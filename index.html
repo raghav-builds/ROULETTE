@@ -1,780 +1,3307 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Roulette Pattern & Next-Number Hint Analyzer (6 Hints)</title>
-  <style>
-    :root {
-      --bg: #0f1115;
-      --panel: #171a21;
-      --panel-2: #1f242e;
-      --border: #2c323f;
-      --text: #f3f4f6;
-      --muted: #9ca3af;
-      --accent: #2dd4bf;
-      --red: #dc2626;
-      --black: #1e232d;
-      --green: #16a34a;
-      --warn: #f59e0b;
-      --purple: #a78bfa;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background: var(--bg); color: var(--text); padding: 14px; max-width: 1120px; margin: 0 auto; }
+<title>Roulette Pattern & Next-Number Hint Analyzer</title>
 
-    header {
-      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
-      gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 14px;
-    }
-    header h1 { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .badge { background: rgba(45, 212, 191, 0.14); color: var(--accent); border: 1px solid rgba(45, 212, 191, 0.35); padding: 3px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
-    .badge.purple { background: rgba(167, 139, 250, 0.15); color: var(--purple); border-color: rgba(167, 139, 250, 0.4); }
+<!-- OCR Library -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
-    .controls-bar {
-      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
-      background: var(--panel); padding: 10px; border-radius: 10px; border: 1px solid var(--border);
-    }
-    .controls-bar input {
-      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-      padding: 8px 12px; border-radius: 8px; font-size: 0.9rem; flex: 1; min-width: 180px;
-    }
-    button {
-      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
-      padding: 8px 12px; border-radius: 8px; font-size: 0.83rem; font-weight: 600; cursor: pointer; transition: 0.15s;
-    }
-    button:hover { border-color: var(--accent); }
-    button.primary { background: var(--accent); color: #081214; border-color: var(--accent); }
-    button.purple-btn { background: rgba(167, 139, 250, 0.18); color: #ddd6fe; border-color: rgba(167, 139, 250, 0.5); }
-    button.danger { background: rgba(220, 38, 38, 0.15); color: #fca5a5; border-color: rgba(220, 38, 38, 0.5); }
-    button.danger:hover { background: rgba(220, 38, 38, 0.28); border-color: #ef4444; }
+<style>
 
-    /* Latest Strip */
-    .latest-strip {
-      display: flex; align-items: center; gap: 6px; overflow-x: auto; min-height: 54px;
-      background: var(--panel); padding: 10px; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 14px;
-    }
-    .strip-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; margin-right: 4px; white-space: nowrap; }
-    .num-pill {
-      min-width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
-      border-radius: 6px; font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
-    }
-    .num-pill.latest { outline: 2px solid #fff; outline-offset: 2px; transform: scale(1.05); }
-    .c-red { background: var(--red); color: #fff; }
-    .c-black { background: var(--black); color: #e5e7eb; border: 1px solid #374151; }
-    .c-green { background: var(--green); color: #fff; }
+:root{
+--bg:#0f1115;
+--panel:#171a21;
+--panel-2:#1f242e;
+--border:#2c323f;
+--text:#f3f4f6;
+--muted:#9ca3af;
+--accent:#2dd4bf;
+--red:#dc2626;
+--black:#1e232d;
+--green:#16a34a;
+--warn:#f59e0b;
+--purple:#a78bfa;
+}
 
-    /* Quick 6-Hint Bar */
-    .quick-hints-bar {
-      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-      background: rgba(45, 212, 191, 0.06); border: 1px solid rgba(45, 212, 191, 0.25);
-      border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
-    }
-    .quick-hints-title { font-size: 0.76rem; font-weight: 700; color: var(--accent); text-transform: uppercase; margin-right: 4px; }
+*{
+box-sizing:border-box;
+margin:0;
+padding:0;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+}
 
-    /* Layout Grid */
-    .main-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px; }
-    @media (max-width: 860px) { .main-grid { grid-template-columns: 1fr; } }
+body{
+background:var(--bg);
+color:var(--text);
+padding:14px;
+max-width:1120px;
+margin:0 auto;
+}
 
-    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
-    .card-title { font-size: 0.9rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+header{
+display:flex;
+flex-wrap:wrap;
+justify-content:space-between;
+align-items:center;
+gap:10px;
+padding-bottom:12px;
+border-bottom:1px solid var(--border);
+margin-bottom:14px;
+}
 
-    /* Hint List */
-    .hint-item {
-      display: flex; align-items: flex-start; gap: 10px; padding: 9px;
-      background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px;
-    }
-    .hint-info { flex: 1; }
-    .hint-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; gap: 6px; flex-wrap: wrap; }
-    .hint-tag { font-size: 0.72rem; font-weight: 700; color: var(--warn); text-transform: uppercase; }
-    .hint-score { font-size: 0.75rem; color: var(--accent); font-weight: 600; }
-    .hint-reason { font-size: 0.82rem; color: #d1d5db; line-height: 1.4; }
-    .src-sys { color: var(--accent); font-weight: 600; }
-    .src-usr { color: var(--purple); font-weight: 600; }
-    .src-whl { color: #fbbf24; font-weight: 600; }
+header h1{
+font-size:1.15rem;
+font-weight:700;
+display:flex;
+align-items:center;
+gap:8px;
+flex-wrap:wrap;
+}
 
-    /* Pattern Alerts */
-    .alert-box {
-      background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3);
-      border-radius: 8px; padding: 9px; margin-bottom: 8px; font-size: 0.82rem; line-height: 1.4;
-    }
-    .alert-box.user-hit {
-      background: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.45);
-    }
+.badge{
+background:rgba(45,212,191,.14);
+color:var(--accent);
+border:1px solid rgba(45,212,191,.35);
+padding:3px 8px;
+border-radius:999px;
+font-size:.75rem;
+font-weight:600;
+}
 
-    .empty-state {
-      text-align: center; padding: 24px 12px; color: var(--muted); font-size: 0.85rem;
-      background: var(--panel-2); border-radius: 8px; border: 1px dashed var(--border);
-    }
+.badge.purple{
+background:rgba(167,139,250,.15);
+color:var(--purple);
+border-color:rgba(167,139,250,.4);
+}
 
-    /* Custom Rules Mini List inside Card */
-    .rule-chip {
-      display: flex; justify-content: space-between; align-items: center; gap: 8px;
-      background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px;
-      padding: 7px 9px; margin-bottom: 6px; font-size: 0.78rem;
-    }
-    .rule-chip.active-rule { border-color: rgba(167, 139, 250, 0.65); background: rgba(167, 139, 250, 0.08); }
-    .rule-chip-text { flex: 1; line-height: 1.3; }
+.controls-bar{
+display:flex;
+flex-wrap:wrap;
+gap:8px;
+margin-bottom:14px;
+background:var(--panel);
+padding:10px;
+border-radius:10px;
+border:1px solid var(--border);
+}
 
-    /* Quick Keypad */
-    .keypad { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin-top: 8px; }
-    @media (max-width: 500px) { .keypad { grid-template-columns: repeat(7, 1fr); } }
-    .key-btn {
-      padding: 9px 0; border-radius: 6px; font-weight: 700; font-size: 0.85rem; text-align: center; border: none;
-    }
+.controls-bar input{
+background:var(--panel-2);
+border:1px solid var(--border);
+color:var(--text);
+padding:8px 12px;
+border-radius:8px;
+font-size:.9rem;
+flex:1;
+min-width:180px;
+}
 
-    /* 12-Column History Matrix */
-    .matrix-grid {
-      display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px;
-      background: #0b0d10; padding: 6px; border-radius: 8px; border: 1px solid var(--border); min-height: 60px;
-    }
-    .matrix-cell {
-      aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
-      font-size: 0.78rem; font-weight: 700; border-radius: 4px;
-    }
-    .matrix-cell.first { outline: 2px solid #fff; z-index: 1; }
+button{
+background:var(--panel-2);
+color:var(--text);
+border:1px solid var(--border);
+padding:8px 12px;
+border-radius:8px;
+font-size:.83rem;
+font-weight:600;
+cursor:pointer;
+transition:.15s;
+}
 
-    /* Stats & Slider */
-    .slider-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
-    .slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
-    .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
-    .stat-box { background: var(--panel-2); padding: 8px; border-radius: 8px; text-align: center; border: 1px solid var(--border); }
-    .stat-box .val { font-size: 1rem; font-weight: 700; color: #fff; }
-    .stat-box .lbl { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+button:hover{
+border-color:var(--accent);
+}
 
-    /* Modals */
-    .modal-backdrop {
-      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.78);
-      align-items: center; justify-content: center; padding: 16px; z-index: 50; overflow-y: auto;
-    }
-    .modal-backdrop.open { display: flex; }
-    .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: 100%; max-width: 540px; }
-    .modal textarea, .modal input, .modal select {
-      width: 100%; background: var(--panel-2); color: var(--text);
-      border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; margin-top: 6px; font-size: 0.85rem;
-    }
-    .form-group { margin-bottom: 10px; }
-    .form-group label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; }
-    .disclaimer { margin-top: 14px; font-size: 0.75rem; color: var(--muted); text-align: center; }
-  </style>
+button.primary{
+background:var(--accent);
+color:#081214;
+border-color:var(--accent);
+}
+
+button.purple-btn{
+background:rgba(167,139,250,.18);
+color:#ddd6fe;
+border-color:rgba(167,139,250,.5);
+}
+
+button.danger{
+background:rgba(220,38,38,.15);
+color:#fca5a5;
+border-color:rgba(220,38,38,.5);
+}
+
+button.danger:hover{
+background:rgba(220,38,38,.28);
+}
+
+button:disabled{
+opacity:.5;
+cursor:not-allowed;
+}
+
+/* IMAGE IMPORT */
+
+.image-import{
+background:var(--panel);
+border:1px solid var(--border);
+border-radius:10px;
+padding:12px;
+margin-bottom:14px;
+}
+
+.image-import-title{
+font-size:.9rem;
+font-weight:700;
+color:var(--accent);
+margin-bottom:8px;
+}
+
+.image-import-row{
+display:flex;
+flex-wrap:wrap;
+gap:8px;
+align-items:center;
+}
+
+.file-label{
+display:inline-flex;
+align-items:center;
+gap:6px;
+background:var(--panel-2);
+border:1px solid var(--border);
+padding:8px 12px;
+border-radius:8px;
+cursor:pointer;
+font-size:.83rem;
+font-weight:600;
+}
+
+.file-label input{
+display:none;
+}
+
+#imagePreview{
+display:none;
+max-width:100%;
+max-height:280px;
+margin-top:10px;
+border-radius:8px;
+border:1px solid var(--border);
+}
+
+.ocr-status{
+font-size:.8rem;
+color:var(--muted);
+margin-top:8px;
+line-height:1.4;
+}
+
+.ocr-result{
+display:none;
+margin-top:12px;
+background:var(--panel-2);
+border:1px solid var(--border);
+border-radius:8px;
+padding:10px;
+}
+
+.ocr-result-title{
+font-size:.8rem;
+font-weight:700;
+color:var(--purple);
+margin-bottom:7px;
+}
+
+.ocr-numbers{
+display:flex;
+flex-wrap:wrap;
+gap:5px;
+}
+
+.ocr-number{
+display:inline-flex;
+align-items:center;
+justify-content:center;
+min-width:34px;
+height:34px;
+border-radius:6px;
+font-weight:700;
+cursor:pointer;
+}
+
+.ocr-number.selected{
+outline:2px solid white;
+outline-offset:2px;
+}
+
+.ocr-help{
+font-size:.72rem;
+color:var(--muted);
+margin-top:8px;
+}
+
+/* LATEST */
+
+.latest-strip{
+display:flex;
+align-items:center;
+gap:6px;
+overflow-x:auto;
+min-height:54px;
+background:var(--panel);
+padding:10px;
+border-radius:10px;
+border:1px solid var(--border);
+margin-bottom:14px;
+}
+
+.strip-label{
+font-size:.75rem;
+color:var(--muted);
+text-transform:uppercase;
+margin-right:4px;
+white-space:nowrap;
+}
+
+.num-pill{
+min-width:34px;
+height:34px;
+display:inline-flex;
+align-items:center;
+justify-content:center;
+border-radius:6px;
+font-weight:700;
+font-size:.9rem;
+flex-shrink:0;
+}
+
+.num-pill.latest{
+outline:2px solid #fff;
+outline-offset:2px;
+transform:scale(1.05);
+}
+
+.c-red{
+background:var(--red);
+color:#fff;
+}
+
+.c-black{
+background:var(--black);
+color:#e5e7eb;
+border:1px solid #374151;
+}
+
+.c-green{
+background:var(--green);
+color:#fff;
+}
+
+/* QUICK */
+
+.quick-hints-bar{
+display:flex;
+align-items:center;
+flex-wrap:wrap;
+gap:8px;
+background:rgba(45,212,191,.06);
+border:1px solid rgba(45,212,191,.25);
+border-radius:8px;
+padding:8px 10px;
+margin-bottom:10px;
+}
+
+.quick-hints-title{
+font-size:.76rem;
+font-weight:700;
+color:var(--accent);
+text-transform:uppercase;
+}
+
+/* GRID */
+
+.main-grid{
+display:grid;
+grid-template-columns:1.2fr .8fr;
+gap:14px;
+}
+
+@media(max-width:860px){
+.main-grid{
+grid-template-columns:1fr;
+}
+}
+
+.card{
+background:var(--panel);
+border:1px solid var(--border);
+border-radius:10px;
+padding:12px;
+}
+
+.card-title{
+font-size:.9rem;
+font-weight:700;
+color:var(--accent);
+margin-bottom:10px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+flex-wrap:wrap;
+gap:6px;
+}
+
+/* HINT */
+
+.hint-item{
+display:flex;
+align-items:flex-start;
+gap:10px;
+padding:9px;
+background:var(--panel-2);
+border:1px solid var(--border);
+border-radius:8px;
+margin-bottom:8px;
+}
+
+.hint-info{
+flex:1;
+}
+
+.hint-header{
+display:flex;
+justify-content:space-between;
+align-items:center;
+margin-bottom:3px;
+gap:6px;
+flex-wrap:wrap;
+}
+
+.hint-tag{
+font-size:.72rem;
+font-weight:700;
+color:var(--warn);
+text-transform:uppercase;
+}
+
+.hint-score{
+font-size:.75rem;
+color:var(--accent);
+font-weight:600;
+}
+
+.hint-reason{
+font-size:.82rem;
+color:#d1d5db;
+line-height:1.4;
+}
+
+.src-sys{
+color:var(--accent);
+font-weight:600;
+}
+
+.src-usr{
+color:var(--purple);
+font-weight:600;
+}
+
+.src-whl{
+color:#fbbf24;
+font-weight:600;
+}
+
+/* ALERT */
+
+.alert-box{
+background:rgba(245,158,11,.08);
+border:1px solid rgba(245,158,11,.3);
+border-radius:8px;
+padding:9px;
+margin-bottom:8px;
+font-size:.82rem;
+line-height:1.4;
+}
+
+.alert-box.user-hit{
+background:rgba(167,139,250,.1);
+border-color:rgba(167,139,250,.45);
+}
+
+.empty-state{
+text-align:center;
+padding:24px 12px;
+color:var(--muted);
+font-size:.85rem;
+background:var(--panel-2);
+border-radius:8px;
+border:1px dashed var(--border);
+}
+
+/* RULE */
+
+.rule-chip{
+display:flex;
+justify-content:space-between;
+align-items:center;
+gap:8px;
+background:var(--panel-2);
+border:1px solid var(--border);
+border-radius:7px;
+padding:7px 9px;
+margin-bottom:6px;
+font-size:.78rem;
+}
+
+.rule-chip.active-rule{
+border-color:rgba(167,139,250,.65);
+background:rgba(167,139,250,.08);
+}
+
+.rule-chip-text{
+flex:1;
+line-height:1.3;
+}
+
+/* KEYPAD */
+
+.keypad{
+display:grid;
+grid-template-columns:repeat(10,1fr);
+gap:5px;
+margin-top:8px;
+}
+
+@media(max-width:500px){
+.keypad{
+grid-template-columns:repeat(7,1fr);
+}
+}
+
+.key-btn{
+padding:9px 0;
+border-radius:6px;
+font-weight:700;
+font-size:.85rem;
+text-align:center;
+border:none;
+}
+
+/* MATRIX */
+
+.matrix-grid{
+display:grid;
+grid-template-columns:repeat(12,1fr);
+gap:3px;
+background:#0b0d10;
+padding:6px;
+border-radius:8px;
+border:1px solid var(--border);
+min-height:60px;
+}
+
+.matrix-cell{
+aspect-ratio:1/1;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:.78rem;
+font-weight:700;
+border-radius:4px;
+}
+
+.matrix-cell.first{
+outline:2px solid #fff;
+z-index:1;
+}
+
+/* STATS */
+
+.slider-row{
+display:flex;
+align-items:center;
+gap:10px;
+margin-top:10px;
+font-size:.8rem;
+color:var(--muted);
+}
+
+.slider-row input[type=range]{
+flex:1;
+accent-color:var(--accent);
+}
+
+.stat-row{
+display:grid;
+grid-template-columns:repeat(3,1fr);
+gap:8px;
+margin-top:10px;
+}
+
+.stat-box{
+background:var(--panel-2);
+padding:8px;
+border-radius:8px;
+text-align:center;
+border:1px solid var(--border);
+}
+
+.stat-box .val{
+font-size:1rem;
+font-weight:700;
+color:#fff;
+}
+
+.stat-box .lbl{
+font-size:.7rem;
+color:var(--muted);
+margin-top:2px;
+}
+
+/* MODAL */
+
+.modal-backdrop{
+display:none;
+position:fixed;
+inset:0;
+background:rgba(0,0,0,.78);
+align-items:center;
+justify-content:center;
+padding:16px;
+z-index:50;
+overflow-y:auto;
+}
+
+.modal-backdrop.open{
+display:flex;
+}
+
+.modal{
+background:var(--panel);
+border:1px solid var(--border);
+border-radius:12px;
+padding:16px;
+width:100%;
+max-width:540px;
+}
+
+.modal textarea,
+.modal input,
+.modal select{
+width:100%;
+background:var(--panel-2);
+color:var(--text);
+border:1px solid var(--border);
+border-radius:8px;
+padding:9px 10px;
+margin-top:6px;
+font-size:.85rem;
+}
+
+.form-group{
+margin-bottom:10px;
+}
+
+.form-group label{
+display:block;
+font-size:.78rem;
+color:var(--muted);
+font-weight:600;
+}
+
+.disclaimer{
+margin-top:14px;
+font-size:.75rem;
+color:var(--muted);
+text-align:center;
+}
+
+</style>
 </head>
+
 <body>
 
 <header>
-  <h1>
-    📊 Roulette Pattern & Hint Engine
-    <span class="badge" id="totalCountBadge">0 Spins</span>
-    <span class="badge purple" id="ruleCountBadge">0 Custom Rules</span>
-  </h1>
-  <div style="display:flex; flex-wrap:wrap; gap:6px;">
-    <button class="purple-btn" onclick="openRuleModal()">⚙️ + Add Custom Pattern/Rule</button>
-    <button onclick="openBulkModal()">📋 Paste Numbers</button>
-    <button onclick="undoLast()">↩ Undo</button>
-    <button class="danger" onclick="clearAllData()">🗑️ Clear All</button>
-    <button onclick="loadSampleData()">↺ Sample</button>
-  </div>
+
+<h1>
+📊 Roulette Pattern & Hint Engine
+
+<span class="badge" id="totalCountBadge">
+0 Spins
+</span>
+
+<span class="badge purple" id="ruleCountBadge">
+0 Custom Rules
+</span>
+
+</h1>
+
+<div style="display:flex;flex-wrap:wrap;gap:6px">
+
+<button class="purple-btn"
+onclick="openRuleModal()">
+⚙️ + Add Custom Pattern/Rule
+</button>
+
+<button onclick="openBulkModal()">
+📋 Paste Numbers
+</button>
+
+<button onclick="openImageModal()">
+📷 Screenshot / Image
+</button>
+
+<button onclick="undoLast()">
+↩ Undo
+</button>
+
+<button class="danger"
+onclick="clearAllData()">
+🗑️ Clear All
+</button>
+
+<button onclick="loadSampleData()">
+↺ Sample
+</button>
+
+</div>
+
 </header>
 
-<div class="controls-bar">
-  <input type="number" id="spinInput" min="0" max="36" placeholder="Type latest spin (0–36) & press Enter..." onkeydown="if(event.key==='Enter') punchFromInput()" />
-  <button class="primary" onclick="punchFromInput()">+ Punch Number</button>
-  <button onclick="simulateRandom(1)">🎲 Sim +1</button>
-  <button onclick="simulateRandom(25)">🎲 Sim +25</button>
+
+<!-- IMAGE OCR -->
+
+<div class="image-import">
+
+<div class="image-import-title">
+📷 Screenshot / Image से Roulette Numbers Punch
 </div>
+
+<div class="image-import-row">
+
+<label class="file-label">
+📂 Select Screenshot / Image
+
+<input
+type="file"
+id="rouletteImage"
+accept="image/*"
+onchange="handleImageSelect(event)"
+>
+
+</label>
+
+<button
+class="primary"
+id="ocrButton"
+onclick="readNumbersFromImage()"
+disabled>
+🔎 Read Numbers
+</button>
+
+<button onclick="clearImageOCR()">
+✕ Clear
+</button>
+
+</div>
+
+<img id="imagePreview">
+
+<div id="ocrStatus" class="ocr-status">
+Image select करने के बाद "Read Numbers" दबाएं।
+</div>
+
+<div id="ocrResult" class="ocr-result">
+
+<div class="ocr-result-title">
+Recognized Numbers — Latest → Oldest
+</div>
+
+<div id="ocrNumbers" class="ocr-numbers"></div>
+
+<div class="ocr-help">
+किसी number पर tap करके उसे remove/add करें।
+फिर "Punch Selected" दबाएं।
+</div>
+
+<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+
+<button class="primary"
+onclick="punchOCRNumbers()">
+➕ Punch Selected
+</button>
+
+<button onclick="selectAllOCR()">
+✓ Select All
+</button>
+
+<button onclick="clearOCRSelection()">
+Clear Selection
+</button>
+
+</div>
+
+</div>
+
+</div>
+
+
+<!-- MANUAL INPUT -->
+
+<div class="controls-bar">
+
+<input
+type="number"
+id="spinInput"
+min="0"
+max="36"
+placeholder="Type latest spin (0–36) & press Enter..."
+onkeydown="if(event.key==='Enter') punchFromInput()"
+>
+
+<button class="primary"
+onclick="punchFromInput()">
++ Punch Number
+</button>
+
+<button onclick="simulateRandom(1)">
+🎲 Sim +1
+</button>
+
+<button onclick="simulateRandom(25)">
+🎲 Sim +25
+</button>
+
+</div>
+
+
+<!-- LATEST -->
 
 <div class="latest-strip" id="latestStrip"></div>
 
+
 <div class="main-grid">
-  <!-- Left: 6 Unified Hints + User Rules + Keypad -->
-  <div style="display:flex; flex-direction:column; gap:14px;">
-    <div class="card">
-      <div class="card-title">
-        <span>🎯 Top 6 Next-Number Hints & Logic</span>
-        <span style="font-size:0.74rem; color:var(--muted);">Single Odds: 2.70% | 6-Num Coverage: 16.22%</span>
-      </div>
-      <div id="quickHintsBar"></div>
-      <div id="patternAlerts"></div>
-      <div id="hintsContainer"></div>
-    </div>
 
-    <div class="card">
-      <div class="card-title">
-        <span>🧠 Your Custom Patterns & Algorithms</span>
-        <button class="purple-btn" style="padding:4px 9px; font-size:0.75rem;" onclick="openRuleModal()">+ New Rule</button>
-      </div>
-      <div id="customRulesList"></div>
-    </div>
+<!-- LEFT -->
 
-    <div class="card">
-      <div class="card-title"><span>⚡ One-Tap Number Punch Pad (Tap to Add)</span></div>
-      <div class="keypad" id="keypad"></div>
-    </div>
-  </div>
+<div style="display:flex;flex-direction:column;gap:14px">
 
-  <!-- Right: 12-Col Matrix & Stats -->
-  <div style="display:flex; flex-direction:column; gap:14px;">
-    <div class="card">
-      <div class="card-title">
-        <span>🔢 Spin History Matrix (12-Col)</span>
-        <span id="windowLabel" class="badge">LAST 0 ROUNDS</span>
-      </div>
-      <div class="matrix-grid" id="matrixGrid"></div>
-      <div class="slider-row">
-        <span>Window:</span>
-        <input type="range" id="windowSlider" min="12" max="500" value="120" oninput="renderAll()" />
-        <strong id="sliderVal">120</strong>
-      </div>
-      <div class="stat-row" id="outsideStats"></div>
-    </div>
-  </div>
+<div class="card">
+
+<div class="card-title">
+
+<span>
+🎯 Top 6 Next-Number Hints & Logic
+</span>
+
+<span style="font-size:.74rem;color:var(--muted)">
+Single Odds: 2.70% | 6-Num Coverage: 16.22%
+</span>
+
 </div>
+
+<div id="quickHintsBar"></div>
+
+<div id="patternAlerts"></div>
+
+<div id="hintsContainer"></div>
+
+</div>
+
+
+<div class="card">
+
+<div class="card-title">
+
+<span>
+🧠 Your Custom Patterns & Algorithms
+</span>
+
+<button
+class="purple-btn"
+style="padding:4px 9px;font-size:.75rem"
+onclick="openRuleModal()">
++ New Rule
+</button>
+
+</div>
+
+<div id="customRulesList"></div>
+
+</div>
+
+
+<div class="card">
+
+<div class="card-title">
+<span>
+⚡ One-Tap Number Punch Pad
+</span>
+</div>
+
+<div class="keypad" id="keypad"></div>
+
+</div>
+
+</div>
+
+
+<!-- RIGHT -->
+
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div class="card">
+
+<div class="card-title">
+
+<span>
+🔢 Spin History Matrix
+</span>
+
+<span id="windowLabel" class="badge">
+LAST 0 ROUNDS
+</span>
+
+</div>
+
+<div class="matrix-grid" id="matrixGrid"></div>
+
+<div class="slider-row">
+
+<span>
+Window:
+</span>
+
+<input
+type="range"
+id="windowSlider"
+min="12"
+max="500"
+value="120"
+oninput="renderAll()"
+>
+
+<strong id="sliderVal">
+120
+</strong>
+
+</div>
+
+<div class="stat-row" id="outsideStats"></div>
+
+</div>
+
+</div>
+
+</div>
+
 
 <p class="disclaimer">
-  Analytical & statistical pattern tool only. Every roulette spin is an independent random event (2.70% per pocket); system and user pattern rules are analytical signals, not guarantees.
+
+Analytical & statistical pattern tool only.
+Every roulette spin is an independent random event
+(2.70% per pocket); system and user pattern rules are
+analytical signals, not guarantees.
+
 </p>
 
-<!-- Bulk Import Modal -->
+
+<!-- BULK MODAL -->
+
 <div class="modal-backdrop" id="bulkModal">
-  <div class="modal">
-    <h3 style="font-size:1rem;">Paste New Numbers (Latest First)</h3>
-    <p style="font-size:0.8rem; color:var(--muted); margin-top:4px;">
-      Comma, space, ya new line se numbers paste karein (e.g., <code>2, 12, 7, 28, 12, 7...</code>):
-    </p>
-    <textarea id="bulkText" style="height:120px;" placeholder="Yahan apne numbers paste karein..."></textarea>
-    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
-      <button onclick="closeBulkModal()">Cancel</button>
-      <button class="primary" onclick="applyBulkImport()">Load Numbers</button>
-    </div>
-  </div>
+
+<div class="modal">
+
+<h3 style="font-size:1rem">
+Paste New Numbers (Latest First)
+</h3>
+
+<p style="font-size:.8rem;color:var(--muted);margin-top:4px">
+
+Comma, space, ya new line se numbers paste karein.
+
+</p>
+
+<textarea
+id="bulkText"
+style="height:120px"
+placeholder="2, 12, 7, 28, 12, 7..."
+></textarea>
+
+<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+
+<button onclick="closeBulkModal()">
+Cancel
+</button>
+
+<button class="primary"
+onclick="applyBulkImport()">
+Load Numbers
+</button>
+
 </div>
 
-<!-- Custom Rule / Pattern Modal -->
+</div>
+
+</div>
+
+
+<!-- RULE MODAL -->
+
 <div class="modal-backdrop" id="ruleModal">
-  <div class="modal">
-    <h3 style="font-size:1rem; color:var(--purple);">⚙️ Add User Pattern / Prediction Rule</h3>
-    <p style="font-size:0.78rem; color:var(--muted); margin-top:3px; margin-bottom:10px;">
-      Apna pattern ya trigger logic define karein — har naye spin par system aur aapke rules dono milkar 6 next-number hints banayenge.
-    </p>
 
-    <div class="form-group">
-      <label>Rule Name / Note (Optional)</label>
-      <input type="text" id="ruleName" placeholder="e.g., After 0 or 15 hit 26, or Red streak reversal" />
-    </div>
+<div class="modal">
 
-    <div class="form-group">
-      <label>Trigger Condition (Kab Activate Ho?)</label>
-      <select id="ruleType" onchange="toggleRuleConditionInputs()">
-        <option value="AFTER_NUM">1. Jab Latest Number Inmein Se Ho (e.g., 0, 15)</option>
-        <option value="REPEAT_X">2. Jab Koi Number Repeat Ho (X → X)</option>
-        <option value="SANDWICH_ABA">3. Jab Sandwich / Mirror Pattern Bane (A-B-A ya A-B-C-A)</option>
-        <option value="COLOR_STREAK">4. Jab Lagatar N Spins Tak Red ya Black Aaye</option>
-        <option value="DOZEN_HIT">5. Jab Latest Number Kis Dozen Mein Ho (1st / 2nd / 3rd)</option>
-      </select>
-    </div>
+<h3 style="font-size:1rem;color:var(--purple)">
+⚙️ Add User Pattern / Prediction Rule
+</h3>
 
-    <div class="form-group" id="condNumbersGroup">
-      <label>Trigger Numbers (0–36, comma separated)</label>
-      <input type="text" id="condNumbers" placeholder="e.g., 0, 15" />
-    </div>
+<p style="font-size:.78rem;color:var(--muted);margin-top:3px;margin-bottom:10px">
 
-    <div class="form-group" id="condStreakGroup" style="display:none;">
-      <label>Color & Streak Count (e.g., RED:3 ya BLACK:4)</label>
-      <input type="text" id="condStreak" placeholder="RED:3" value="RED:3" />
-    </div>
+Apna pattern ya trigger logic define karein.
 
-    <div class="form-group" id="condDozenGroup" style="display:none;">
-      <label>Dozen (1 = 1–12, 2 = 13–24, 3 = 25–36)</label>
-      <select id="condDozen">
-        <option value="1">1st Dozen (1–12)</option>
-        <option value="2">2nd Dozen (13–24)</option>
-        <option value="3">3rd Dozen (25–36)</option>
-      </select>
-    </div>
+</p>
 
-    <div class="form-group">
-      <label>Hint / Target Numbers to Suggest (0–36, comma separated)</label>
-      <input type="text" id="targetNumbers" placeholder="e.g., 26, 32, 19, 8, 15, 0" />
-    </div>
 
-    <div class="form-group">
-      <label>Priority Weight (10 to 50)</label>
-      <input type="number" id="ruleWeight" min="10" max="50" value="28" />
-    </div>
+<div class="form-group">
 
-    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-      <button onclick="closeRuleModal()">Cancel</button>
-      <button class="primary" onclick="saveCustomRule()">Save Rule</button>
-    </div>
-  </div>
+<label>
+Rule Name / Note
+</label>
+
+<input
+type="text"
+id="ruleName"
+placeholder="e.g. After 0 or 15 hit 26"
+>
+
 </div>
+
+
+<div class="form-group">
+
+<label>
+Trigger Condition
+</label>
+
+<select
+id="ruleType"
+onchange="toggleRuleConditionInputs()">
+
+<option value="AFTER_NUM">
+1. Latest Number
+</option>
+
+<option value="REPEAT_X">
+2. Number Repeat
+</option>
+
+<option value="SANDWICH_ABA">
+3. Sandwich / Mirror
+</option>
+
+<option value="COLOR_STREAK">
+4. Red / Black Streak
+</option>
+
+<option value="DOZEN_HIT">
+5. Dozen Hit
+</option>
+
+</select>
+
+</div>
+
+
+<div class="form-group"
+id="condNumbersGroup">
+
+<label>
+Trigger Numbers
+</label>
+
+<input
+type="text"
+id="condNumbers"
+placeholder="0, 15"
+>
+
+</div>
+
+
+<div class="form-group"
+id="condStreakGroup"
+style="display:none">
+
+<label>
+Color & Streak
+</label>
+
+<input
+type="text"
+id="condStreak"
+placeholder="RED:3"
+value="RED:3"
+>
+
+</div>
+
+
+<div class="form-group"
+id="condDozenGroup"
+style="display:none">
+
+<label>
+Dozen
+</label>
+
+<select id="condDozen">
+
+<option value="1">
+1st Dozen (1–12)
+</option>
+
+<option value="2">
+2nd Dozen (13–24)
+</option>
+
+<option value="3">
+3rd Dozen (25–36)
+</option>
+
+</select>
+
+</div>
+
+
+<div class="form-group">
+
+<label>
+Hint / Target Numbers
+</label>
+
+<input
+type="text"
+id="targetNumbers"
+placeholder="26, 32, 19, 8, 15, 0"
+>
+
+</div>
+
+
+<div class="form-group">
+
+<label>
+Priority Weight
+</label>
+
+<input
+type="number"
+id="ruleWeight"
+min="10"
+max="50"
+value="28"
+>
+
+</div>
+
+
+<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+
+<button onclick="closeRuleModal()">
+Cancel
+</button>
+
+<button class="primary"
+onclick="saveCustomRule()">
+Save Rule
+</button>
+
+</div>
+
+</div>
+
+</div>
+
 
 <script>
-  const RED_NUMS = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
-  const WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
 
-  const DEFAULT_SPINS = [
-    2,12,7,28,12,7,20,14,7,35,31,7,4,23,
-    4,23,21,17,8,36,24,7,36,16,23,18,10,16,30,5,34,6,12,26,5,25,
-    18,29,28,3,27,17,24,16,5,0,19,6,35,17,3,25,19,24,32,0,15,0,
-    36,13,13,31,20,29,22,2,18,14,10,19,26,3,18,12,24,27,13,21,23,19,
-    34,7,2,10,29,16,32,32,14,16,33,18,16,8,27,29,24,26,22,36,7,26,
-    33,26,2,24,24,8,24,2,12,15,34,30,0,20,20,21,19,8,18,34,27,28,
-    11,11,9,19,9,8,27,12,26,10,9,2,26,1,36,25,36,19,7,21,34,17,
-    11,22,11,22,9,19,17,33,26,22,30,14,25,26,29,34,15,35,5,5,11,10,
-    31,29,12,18,18,31,1,23,19,8,16,35,24,9,35,6,0,19,1,29,12,11,
-    35,10,2,30,25,28,36,26,1,35,22
-  ];
+/* =========================================================
+   BASIC DATA
+========================================================= */
 
-  let savedRaw = localStorage.getItem('roulette_spins_v5');
-  let spins = savedRaw !== null ? JSON.parse(savedRaw) : [...DEFAULT_SPINS];
-  let customRules = JSON.parse(localStorage.getItem('roulette_custom_rules_v1') || '[]');
+const RED_NUMS = new Set([
+1,3,5,7,9,12,14,16,18,
+19,21,23,25,27,30,32,34,36
+]);
 
-  function getColor(n) {
-    if (n === 0) return 'GREEN';
-    return RED_NUMS.has(n) ? 'RED' : 'BLACK';
-  }
+const WHEEL_ORDER = [
+0,32,15,19,4,21,2,25,17,34,
+6,27,13,36,11,30,8,23,10,5,
+24,16,33,1,20,14,31,9,22,18,
+29,7,28,12,35,3,26
+];
 
-  function getColorClass(n) {
-    if (n === 0) return 'c-green';
-    return RED_NUMS.has(n) ? 'c-red' : 'c-black';
-  }
 
-  // Returns wheel neighbors with exact slot distance & direction relative to `num`
-  function getWheelNeighborsDetailed(num, maxRadius = 6) {
-    const idx = WHEEL_ORDER.indexOf(num);
-    if (idx === -1) return [];
-    const res = [];
-    for (let step = 1; step <= maxRadius; step++) {
-      const rightIdx = (idx + step) % WHEEL_ORDER.length;
-      const leftIdx = (idx - step + WHEEL_ORDER.length) % WHEEL_ORDER.length;
-      const ord = step === 1 ? '1st' : step === 2 ? '2nd' : step === 3 ? '3rd' : `${step}th`;
-      res.push({
-        num: WHEEL_ORDER[rightIdx],
-        step,
-        label: `${ord} Right of wheel #${num}`
-      });
-      res.push({
-        num: WHEEL_ORDER[leftIdx],
-        step,
-        label: `${ord} Left of wheel #${num}`
-      });
-    }
-    return res;
-  }
+const DEFAULT_SPINS = [
+2,12,7,28,12,7,20,14,7,35,31,7,4,23,
+4,23,21,17,8,36,24,7,36,16,23,18,10,16,
+30,5,34,6,12,26,5,25,18,29,28,3,27,17,24,
+16,5,0,19,6,35,17,3,25,19,24,32,0,15,0,
+36,13,13,31,20,29,22,2,18,14,10,19,26,3,18,
+12,24,27,13,21,23,19,34,7,2,10,29,16,32,32,
+14,16,33,18,16,8,27,29,24,26,22,36,7,26,
+33,26,2,24,24,8,24,2,12,15,34,30,0,20,20,
+21,19,8,18,34,27,28,11,11,9,19,9,8,27,12,
+26,10,9,2,26,1,36,25,36,19,7,21,34,17,11,
+22,11,22,9,19,17,33,26,22,30,14,25,26,29,
+34,15,35,5,5,11,10,31,29,12,18,18,31,1,
+23,19,8,16,35,24,9,35,6,0,19,1,29,12,11,
+35,10,2,30,25,28,36,26,1,35,22
+];
 
-  function saveSpins() {
-    localStorage.setItem('roulette_spins_v5', JSON.stringify(spins.slice(0, 500)));
-  }
 
-  function saveRules() {
-    localStorage.setItem('roulette_custom_rules_v1', JSON.stringify(customRules));
-  }
+let savedRaw =
+localStorage.getItem('roulette_spins_v5');
 
-  function punchNumber(n) {
-    if (isNaN(n) || n < 0 || n > 36) return;
-    spins.unshift(n);
-    if (spins.length > 500) spins.pop();
-    saveSpins();
-    renderAll();
-  }
+let spins =
+savedRaw !== null
+? JSON.parse(savedRaw)
+: [...DEFAULT_SPINS];
 
-  function punchFromInput() {
-    const inp = document.getElementById('spinInput');
-    const val = parseInt(inp.value, 10);
-    if (!isNaN(val) && val >= 0 && val <= 36) {
-      punchNumber(val);
-      inp.value = '';
-    }
-  }
 
-  function simulateRandom(count) {
-    for (let i = 0; i < count; i++) {
-      spins.unshift(Math.floor(Math.random() * 37));
-    }
-    spins = spins.slice(0, 500);
-    saveSpins();
-    renderAll();
-  }
+let customRules =
+JSON.parse(
+localStorage.getItem('roulette_custom_rules_v1') || '[]'
+);
 
-  function undoLast() {
-    if (spins.length > 0) {
-      spins.shift();
-      saveSpins();
-      renderAll();
-    }
-  }
 
-  function clearAllData() {
-    spins = [];
-    saveSpins();
-    document.getElementById('spinInput').value = '';
-    document.getElementById('bulkText').value = '';
-    renderAll();
-  }
+/* =========================================================
+   OCR VARIABLES
+========================================================= */
 
-  function loadSampleData() {
-    spins = [...DEFAULT_SPINS];
-    saveSpins();
-    renderAll();
-  }
+let ocrNumbers = [];
+let selectedOCRNumbers = [];
+let selectedImageFile = null;
 
-  function evaluateCustomRules(windowSpins, scores, reasons, alerts, activeRuleIds) {
-    if (windowSpins.length === 0 || customRules.length === 0) return;
 
-    const latest = windowSpins[0];
-    const second = windowSpins[1];
-    const third = windowSpins[2];
+/* =========================================================
+   COLOR
+========================================================= */
 
-    customRules.forEach(rule => {
-      if (!rule.enabled) return;
-      let triggered = false;
-      let triggerDesc = '';
+function getColor(n){
 
-      if (rule.type === 'AFTER_NUM') {
-        if (rule.triggerNums.includes(latest)) {
-          triggered = true;
-          triggerDesc = `Latest spin ${latest} matches [${rule.triggerNums.join(', ')}]`;
-        }
-      } else if (rule.type === 'REPEAT_X') {
-        if (second !== undefined && latest === second) {
-          if (rule.triggerNums.length === 0 || rule.triggerNums.includes(latest)) {
-            triggered = true;
-            triggerDesc = `Repeater ${latest} → ${latest} detected`;
-          }
-        }
-      } else if (rule.type === 'SANDWICH_ABA') {
-        if ((second !== undefined && latest === second) || (third !== undefined && latest === third)) {
-          triggered = true;
-          triggerDesc = `Mirror/Sandwich pattern matched around ${latest}`;
-        }
-      } else if (rule.type === 'COLOR_STREAK') {
-        const { color, count } = rule.streakConfig || { color: 'RED', count: 3 };
-        let streak = 0;
-        for (const n of windowSpins) {
-          if (getColor(n) === color) streak++;
-          else break;
-        }
-        if (streak >= count) {
-          triggered = true;
-          triggerDesc = `${streak}x ${color} streak active (target ≥ ${count})`;
-        }
-      } else if (rule.type === 'DOZEN_HIT') {
-        const d = rule.dozen || 1;
-        const inDozen = (d === 1 && latest >= 1 && latest <= 12) ||
-                        (d === 2 && latest >= 13 && latest <= 24) ||
-                        (d === 3 && latest >= 25 && latest <= 36);
-        if (inDozen) {
-          triggered = true;
-          triggerDesc = `Latest ${latest} is in Dozen ${d}`;
-        }
-      }
+if(n === 0)
+return 'GREEN';
 
-      if (triggered) {
-        activeRuleIds.add(rule.id);
-        alerts.push(`<div class="alert-box user-hit">🧠 <strong>User Rule Triggered (${rule.name || rule.type}):</strong> ${triggerDesc} → Suggesting [${rule.targets.join(', ')}]</div>`);
-        rule.targets.forEach(tNum => {
-          scores[tNum] += rule.weight;
-          reasons[tNum].push(`<span class="src-usr">[User Rule: ${rule.name || rule.type}]</span> ${triggerDesc}`);
-        });
-      }
-    });
-  }
+return RED_NUMS.has(n)
+? 'RED'
+: 'BLACK';
 
-  function analyzePatterns(windowSpins) {
-    if (windowSpins.length === 0) return { candidates: [], alerts: [], activeRuleIds: new Set() };
+}
 
-    const scores = {};
-    const reasons = {};
-    for (let i = 0; i <= 36; i++) { scores[i] = 0; reasons[i] = []; }
 
-    const freq = {};
-    windowSpins.forEach(n => freq[n] = (freq[n] || 0) + 1);
+function getColorClass(n){
 
-    const latest = windowSpins[0];
-    const second = windowSpins[1];
-    const alerts = [];
-    const activeRuleIds = new Set();
+if(n === 0)
+return 'c-green';
 
-    // 1. System: Direct Repeater (X -> X)
-    scores[latest] += 22;
-    reasons[latest].push(`<span class="src-sys">[System Repeater]</span> Latest ${latest} repeat watch (${latest} → ${latest})`);
+return RED_NUMS.has(n)
+? 'c-red'
+: 'c-black';
 
-    // 2. System: Sandwich / Mirror Pattern (A - B - A)
-    if (second !== undefined) {
-      scores[second] += 24;
-      reasons[second].push(`<span class="src-sys">[System Sandwich]</span> Mirror setup (${second} - ${latest} - ${second})`);
-      alerts.push(`<div class="alert-box">🔄 <strong>System Mirror Watch:</strong> Latest <b>${latest}</b> ke pehle <b>${second}</b> tha — agar <b>${second}</b> aata hai toh <code>${second}-${latest}-${second}</code> sandwich banega.</div>`);
-    }
+}
 
-    // 3. System: Sequence Follow-up
-    if (windowSpins.length >= 4) {
-      for (let i = 1; i < Math.min(windowSpins.length - 1, 35); i++) {
-        if (windowSpins[i] === latest && windowSpins[i - 1] !== undefined) {
-          const follower = windowSpins[i - 1];
-          scores[follower] += 18;
-          reasons[follower].push(`<span class="src-sys">[System Sequence]</span> Earlier after ${latest}, next was ${follower}`);
-          break;
-        }
-      }
-    }
 
-    // 4. System: Wheel Neighbors (detailed slot & direction logic)
-    const wheelMetaMap = {};
-    const detailedNeighbors = getWheelNeighborsDetailed(latest, 6);
-    detailedNeighbors.forEach(nb => {
-      if (!wheelMetaMap[nb.num]) wheelMetaMap[nb.num] = nb.label;
-      if (nb.step <= 3) {
-        const pts = nb.step === 1 ? 18 : (nb.step === 2 ? 14 : 10);
-        scores[nb.num] += pts;
-        reasons[nb.num].push(`<span class="src-whl">[Wheel Neighbor]</span> ${nb.label}`);
-      }
-    });
+/* =========================================================
+   WHEEL
+========================================================= */
 
-    // 5. System: Hot Frequency Weight
-    const sortedByFreq = Object.entries(freq).sort((a, b) => b[1] - a[1]);
-    sortedByFreq.slice(0, 6).forEach(([numStr, count], rank) => {
-      const n = parseInt(numStr, 10);
-      scores[n] += (14 - rank * 2);
-      reasons[n].push(`<span class="src-sys">[System Frequency]</span> ${count} hits in last ${windowSpins.length} spins`);
-    });
+function getWheelNeighborsDetailed(num,maxRadius=6){
 
-    // 6. System: Dozen Reversion Alert
-    if (windowSpins.length >= 6) {
-      const recent6 = windowSpins.slice(0, 6);
-      const d1 = recent6.filter(x => x >= 1 && x <= 12).length;
-      const d2 = recent6.filter(x => x >= 13 && x <= 24).length;
-      const d3 = recent6.filter(x => x >= 25 && x <= 36).length;
-      if (d1 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>System Dozen Shift:</strong> Last 6 spins mein 1st Dozen (1–12) ${d1} baar aaya hai.</div>`);
-      if (d2 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>System Dozen Shift:</strong> Last 6 spins mein 2nd Dozen (13–24) ${d2} baar aaya hai.</div>`);
-      if (d3 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>System Dozen Shift:</strong> Last 6 spins mein 3rd Dozen (25–36) ${d3} baar aaya hai.</div>`);
-    }
+const idx =
+WHEEL_ORDER.indexOf(num);
 
-    // 7. Merge User Custom Rules
-    evaluateCustomRules(windowSpins, scores, reasons, alerts, activeRuleIds);
+if(idx === -1)
+return [];
 
-    // Rank top 6 and fill any remaining slots via getWheelNeighbors with explicit wheel logic
-    const ranked = Object.keys(scores)
-      .map(k => ({ num: parseInt(k, 10), score: scores[k], reasons: reasons[k] }))
-      .sort((a, b) => b.score - a.score);
+const res = [];
 
-    const candidates = ranked.filter(x => x.reasons.length > 0).slice(0, 6);
+for(let step=1;step<=maxRadius;step++){
 
-    for (const nb of detailedNeighbors) {
-      if (candidates.length >= 6) break;
-      if (!candidates.some(c => c.num === nb.num)) {
-        candidates.push({
-          num: nb.num,
-          score: scores[nb.num] + (8 - nb.step),
-          reasons: [
-            ...reasons[nb.num],
-            `<span class="src-whl">[Wheel Neighbor Fill]</span> Selected via getWheelNeighbors — ${nb.label}`
-          ]
-        });
-      }
-    }
+const rightIdx =
+(idx + step) % WHEEL_ORDER.length;
 
-    return { candidates: candidates.slice(0, 6), alerts, activeRuleIds };
-  }
+const leftIdx =
+(idx - step + WHEEL_ORDER.length)
+% WHEEL_ORDER.length;
 
-  function renderCustomRulesList(activeRuleIds) {
-    const el = document.getElementById('customRulesList');
-    document.getElementById('ruleCountBadge').textContent = `${customRules.length} Custom Rules`;
+const ord =
+step===1
+?'1st'
+:step===2
+?'2nd'
+:step===3
+?'3rd'
+:`${step}th`;
 
-    if (customRules.length === 0) {
-      el.innerHTML = `<div style="font-size:0.8rem; color:var(--muted); padding:8px;">Abhi koi custom rule nahi hai. "+ Add Custom Pattern/Rule" par click karke apna rule add karein.</div>`;
-      return;
-    }
+res.push({
+num:WHEEL_ORDER[rightIdx],
+step,
+label:`${ord} Right of wheel #${num}`
+});
 
-    el.innerHTML = customRules.map(r => {
-      const isActive = activeRuleIds.has(r.id);
-      const condSummary = r.type === 'AFTER_NUM' ? `Latest in [${r.triggerNums.join(',')}]`
-        : r.type === 'REPEAT_X' ? `Repeater (${r.triggerNums.length ? r.triggerNums.join(',') : 'Any'})`
-        : r.type === 'SANDWICH_ABA' ? `Mirror/Sandwich`
-        : r.type === 'COLOR_STREAK' ? `${r.streakConfig.count}x ${r.streakConfig.color}`
-        : `Dozen ${r.dozen}`;
+res.push({
+num:WHEEL_ORDER[leftIdx],
+step,
+label:`${ord} Left of wheel #${num}`
+});
 
-      return `
-        <div class="rule-chip ${isActive ? 'active-rule' : ''}">
-          <div class="rule-chip-text">
-            <strong>${r.name || r.type}</strong> ${isActive ? '<span style="color:var(--purple);">• TRIGGERED</span>' : ''}<br/>
-            <span style="color:var(--muted);">If: ${condSummary} → Hint: [${r.targets.join(', ')}] (Wt: ${r.weight})</span>
-          </div>
-          <div style="display:flex; gap:4px;">
-            <button style="padding:4px 7px; font-size:0.72rem;" onclick="toggleRule('${r.id}')">${r.enabled ? 'ON' : 'OFF'}</button>
-            <button class="danger" style="padding:4px 7px; font-size:0.72rem;" onclick="deleteRule('${r.id}')">✕</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
+}
 
-  function renderAll() {
-    const winSize = parseInt(document.getElementById('windowSlider').value, 10);
-    document.getElementById('sliderVal').textContent = winSize;
-    document.getElementById('totalCountBadge').textContent = `${spins.length} Spins`;
-    document.getElementById('windowLabel').textContent = `LAST ${Math.min(winSize, spins.length)} ROUNDS`;
+return res;
 
-    const activeSpins = spins.slice(0, winSize);
+}
 
-    const strip = document.getElementById('latestStrip');
-    if (activeSpins.length === 0) {
-      strip.innerHTML = `<span class="strip-label">Empty — Keypad se number punch karein ya "Paste Numbers" use karein</span>`;
-    } else {
-      strip.innerHTML = `<span class="strip-label">Latest →</span>` +
-        activeSpins.slice(0, 16).map((n, idx) =>
-          `<span class="num-pill ${getColorClass(n)} ${idx === 0 ? 'latest' : ''}">${n}</span>`
-        ).join('');
-    }
 
-    const quickHintsBar = document.getElementById('quickHintsBar');
-    const alertsEl = document.getElementById('patternAlerts');
-    const hintsEl = document.getElementById('hintsContainer');
+/* =========================================================
+   STORAGE
+========================================================= */
 
-    if (activeSpins.length === 0) {
-      quickHintsBar.innerHTML = '';
-      alertsEl.innerHTML = '';
-      hintsEl.innerHTML = `<div class="empty-state">Abhi koi number feed nahi hai.<br/>Numbers punch karein — 6 hinted numbers aur unka logic yahan aayega.</div>`;
-      renderCustomRulesList(new Set());
-    } else {
-      const { candidates, alerts, activeRuleIds } = analyzePatterns(activeSpins);
-      quickHintsBar.innerHTML = `
-        <div class="quick-hints-bar">
-          <span class="quick-hints-title">6 Hints:</span>
-          ${candidates.map(c => `<span class="num-pill ${getColorClass(c.num)}">${c.num}</span>`).join('')}
-        </div>
-      `;
-      alertsEl.innerHTML = alerts.join('');
-      renderCustomRulesList(activeRuleIds);
+function saveSpins(){
 
-      hintsEl.innerHTML = candidates.map((c, idx) => `
-        <div class="hint-item">
-          <span class="num-pill ${getColorClass(c.num)}">${c.num}</span>
-          <div class="hint-info">
-            <div class="hint-header">
-              <span class="hint-tag">Hint #${idx + 1} • ${getColor(c.num)}</span>
-              <span class="hint-score">Score: ${c.score} | Single: 2.70%</span>
-            </div>
-            <div class="hint-reason"><strong>Logic:</strong> ${c.reasons.join(' • ')}</div>
-          </div>
-        </div>
-      `).join('');
-    }
+localStorage.setItem(
+'roulette_spins_v5',
+JSON.stringify(
+spins.slice(0,500)
+)
+);
 
-    const matrix = document.getElementById('matrixGrid');
-    if (activeSpins.length === 0) {
-      matrix.innerHTML = `<div style="grid-column: 1 / -1; text-align:center; padding:16px; color:var(--muted); font-size:0.8rem;">0 numbers in history</div>`;
-    } else {
-      matrix.innerHTML = activeSpins.slice(0, 180).map((n, idx) =>
-        `<div class="matrix-cell ${getColorClass(n)} ${idx === 0 ? 'first' : ''}">${n}</div>`
-      ).join('');
-    }
+}
 
-    const reds = activeSpins.filter(n => RED_NUMS.has(n)).length;
-    const blacks = activeSpins.filter(n => n !== 0 && !RED_NUMS.has(n)).length;
-    const zeros = activeSpins.filter(n => n === 0).length;
-    const total = activeSpins.length;
 
-    document.getElementById('outsideStats').innerHTML = `
-      <div class="stat-box"><div class="val" style="color:#f87171">${total ? ((reds/total)*100).toFixed(1) : '0.0'}%</div><div class="lbl">RED (${reds})</div></div>
-      <div class="stat-box"><div class="val">${total ? ((blacks/total)*100).toFixed(1) : '0.0'}%</div><div class="lbl">BLACK (${blacks})</div></div>
-      <div class="stat-box"><div class="val" style="color:#4ade80">${total ? ((zeros/total)*100).toFixed(1) : '0.0'}%</div><div class="lbl">ZERO (${zeros})</div></div>
-    `;
-  }
+function saveRules(){
 
-  function buildKeypad() {
-    const pad = document.getElementById('keypad');
-    let html = '';
-    for (let i = 0; i <= 36; i++) {
-      html += `<button class="key-btn ${getColorClass(i)}" onclick="punchNumber(${i})">${i}</button>`;
-    }
-    pad.innerHTML = html;
-  }
+localStorage.setItem(
+'roulette_custom_rules_v1',
+JSON.stringify(customRules)
+);
 
-  function openBulkModal() { document.getElementById('bulkModal').classList.add('open'); }
-  function closeBulkModal() { document.getElementById('bulkModal').classList.remove('open'); }
+}
 
-  function applyBulkImport() {
-    const raw = document.getElementById('bulkText').value;
-    const parsed = raw.split(/[\s,;|\n]+/)
-      .map(s => parseInt(s.trim(), 10))
-      .filter(n => !isNaN(n) && n >= 0 && n <= 36);
-    if (parsed.length > 0) {
-      spins = parsed.slice(0, 500);
-      saveSpins();
-      renderAll();
-      closeBulkModal();
-    }
-  }
 
-  function openRuleModal() {
-    toggleRuleConditionInputs();
-    document.getElementById('ruleModal').classList.add('open');
-  }
-  function closeRuleModal() { document.getElementById('ruleModal').classList.remove('open'); }
+/* =========================================================
+   PUNCH
+========================================================= */
 
-  function toggleRuleConditionInputs() {
-    const type = document.getElementById('ruleType').value;
-    document.getElementById('condNumbersGroup').style.display = (type === 'AFTER_NUM' || type === 'REPEAT_X') ? 'block' : 'none';
-    document.getElementById('condStreakGroup').style.display = (type === 'COLOR_STREAK') ? 'block' : 'none';
-    document.getElementById('condDozenGroup').style.display = (type === 'DOZEN_HIT') ? 'block' : 'none';
-  }
+function punchNumber(n){
 
-  function parseNumList(str) {
-    return str.split(/[\s,;|\n]+/)
-      .map(s => parseInt(s.trim(), 10))
-      .filter(n => !isNaN(n) && n >= 0 && n <= 36);
-  }
+if(
+isNaN(n) ||
+n < 0 ||
+n > 36
+)
+return;
 
-  function saveCustomRule() {
-    const type = document.getElementById('ruleType').value;
-    const name = document.getElementById('ruleName').value.trim();
-    const targets = parseNumList(document.getElementById('targetNumbers').value);
-    const weight = Math.max(10, Math.min(50, parseInt(document.getElementById('ruleWeight').value, 10) || 28));
+spins.unshift(n);
 
-    if (targets.length === 0) return;
+if(spins.length > 500)
+spins.pop();
 
-    const triggerNums = parseNumList(document.getElementById('condNumbers').value);
-    const streakRaw = document.getElementById('condStreak').value.trim().toUpperCase();
-    const parts = streakRaw.split(':');
-    const streakConfig = {
-      color: (parts[0] === 'BLACK' ? 'BLACK' : 'RED'),
-      count: Math.max(2, parseInt(parts[1], 10) || 3)
-    };
-    const dozen = parseInt(document.getElementById('condDozen').value, 10) || 1;
+saveSpins();
+renderAll();
 
-    customRules.unshift({
-      id: 'rule_' + Date.now(),
-      name,
-      type,
-      triggerNums,
-      streakConfig,
-      dozen,
-      targets,
-      weight,
-      enabled: true
-    });
+}
 
-    saveRules();
-    document.getElementById('ruleName').value = '';
-    document.getElementById('condNumbers').value = '';
-    document.getElementById('targetNumbers').value = '';
-    closeRuleModal();
-    renderAll();
-  }
 
-  function toggleRule(id) {
-    const r = customRules.find(x => x.id === id);
-    if (r) { r.enabled = !r.enabled; saveRules(); renderAll(); }
-  }
+function punchFromInput(){
 
-  function deleteRule(id) {
-    customRules = customRules.filter(x => x.id !== id);
-    saveRules();
-    renderAll();
-  }
+const inp =
+document.getElementById('spinInput');
 
-  buildKeypad();
-  renderAll();
+const val =
+parseInt(inp.value,10);
+
+if(
+!isNaN(val) &&
+val >= 0 &&
+val <= 36
+){
+
+punchNumber(val);
+
+inp.value='';
+
+}
+
+}
+
+
+function simulateRandom(count){
+
+for(let i=0;i<count;i++){
+
+spins.unshift(
+Math.floor(Math.random()*37)
+);
+
+}
+
+spins=spins.slice(0,500);
+
+saveSpins();
+renderAll();
+
+}
+
+
+function undoLast(){
+
+if(spins.length>0){
+
+spins.shift();
+
+saveSpins();
+renderAll();
+
+}
+
+}
+
+
+function clearAllData(){
+
+if(!confirm('Clear all roulette history?'))
+return;
+
+spins=[];
+
+saveSpins();
+
+document.getElementById('spinInput').value='';
+
+document.getElementById('bulkText').value='';
+
+renderAll();
+
+}
+
+
+function loadSampleData(){
+
+spins=[...DEFAULT_SPINS];
+
+saveSpins();
+
+renderAll();
+
+}
+
+
+/* =========================================================
+   OCR IMAGE HANDLING
+========================================================= */
+
+function openImageModal(){
+
+document
+.getElementById('rouletteImage')
+.click();
+
+}
+
+
+function handleImageSelect(event){
+
+const file =
+event.target.files[0];
+
+if(!file)
+return;
+
+selectedImageFile=file;
+
+const preview =
+document.getElementById('imagePreview');
+
+preview.src =
+URL.createObjectURL(file);
+
+preview.style.display='block';
+
+document
+.getElementById('ocrButton')
+.disabled=false;
+
+document
+.getElementById('ocrStatus')
+.textContent=
+`Image selected: ${file.name}. अब Read Numbers दबाएं।`;
+
+document
+.getElementById('ocrResult')
+.style.display='none';
+
+ocrNumbers=[];
+selectedOCRNumbers=[];
+
+}
+
+
+/* =========================================================
+   IMAGE PREPROCESSING
+========================================================= */
+
+function preprocessImage(file){
+
+return new Promise((resolve,reject)=>{
+
+const img=new Image();
+
+img.onload=function(){
+
+const scale=3;
+
+const canvas=
+document.createElement('canvas');
+
+canvas.width=
+img.width*scale;
+
+canvas.height=
+img.height*scale;
+
+const ctx=
+canvas.getContext('2d');
+
+ctx.drawImage(
+img,
+0,
+0,
+canvas.width,
+canvas.height
+);
+
+/*
+Grayscale + contrast
+*/
+
+const imageData=
+ctx.getImageData(
+0,
+0,
+canvas.width,
+canvas.height
+);
+
+const data=
+imageData.data;
+
+for(let i=0;i<data.length;i+=4){
+
+const r=data[i];
+const g=data[i+1];
+const b=data[i+2];
+
+let gray=
+0.299*r+
+0.587*g+
+0.114*b;
+
+gray=
+Math.min(
+255,
+Math.max(
+0,
+(gray-128)*1.5+128
+)
+);
+
+data[i]=gray;
+data[i+1]=gray;
+data[i+2]=gray;
+
+}
+
+ctx.putImageData(
+imageData,
+0,
+0
+);
+
+canvas.toBlob(
+blob=>resolve(blob),
+'image/png'
+);
+
+};
+
+img.onerror=reject;
+
+img.src=
+URL.createObjectURL(file);
+
+});
+
+}
+
+
+/* =========================================================
+   OCR
+========================================================= */
+
+async function readNumbersFromImage(){
+
+if(!selectedImageFile)
+return;
+
+const status=
+document.getElementById('ocrStatus');
+
+const button=
+document.getElementById('ocrButton');
+
+button.disabled=true;
+
+status.textContent=
+'⏳ Image process हो रही है...';
+
+try{
+
+const processed=
+await preprocessImage(
+selectedImageFile
+);
+
+status.textContent=
+'🔎 OCR numbers read कर रहा है...';
+
+const result=
+await Tesseract.recognize(
+processed,
+'eng',
+{
+logger:m=>{
+if(m.status==='recognizing text'){
+
+const p=
+Math.round((m.progress||0)*100);
+
+status.textContent=
+`🔎 Reading numbers... ${p}%`;
+
+}
+}
+}
+);
+
+const text=
+result.data.text;
+
+const parsed=
+extractRouletteNumbers(text);
+
+ocrNumbers=parsed;
+
+selectedOCRNumbers=
+[...parsed];
+
+renderOCRNumbers();
+
+if(parsed.length===0){
+
+status.textContent=
+'⚠️ कोई valid 0–36 number नहीं मिला। Screenshot crop करके फिर try करें।';
+
+}
+else{
+
+status.textContent=
+`✅ ${parsed.length} numbers मिले। नीचे verify करके Punch Selected करें।`;
+
+}
+
+}
+catch(error){
+
+console.error(error);
+
+status.textContent=
+'❌ OCR error. Clear image करके दोबारा try करें।';
+
+}
+
+button.disabled=false;
+
+}
+
+
+/* =========================================================
+   OCR NUMBER EXTRACTION
+========================================================= */
+
+function extractRouletteNumbers(text){
+
+if(!text)
+return [];
+
+/*
+OCR commonly creates:
+0
+12
+7
+28
+etc.
+
+पहले tokens निकालते हैं।
+*/
+
+const tokens=
+text
+.replace(/[^\d\s,;|.-]/g,' ')
+.split(/[\s,;|]+/);
+
+
+/*
+Number normalize
+*/
+
+const nums=[];
+
+for(const token of tokens){
+
+const cleaned=
+token.trim();
+
+if(!cleaned)
+continue;
+
+const n=
+parseInt(cleaned,10);
+
+if(
+!isNaN(n) &&
+n>=0 &&
+n<=36
+){
+
+nums.push(n);
+
+}
+
+}
+
+
+/*
+Duplicate OCR fragments remove नहीं कर रहे,
+क्योंकि roulette history में duplicate numbers valid हैं।
+*/
+
+return nums;
+
+}
+
+
+/* =========================================================
+   OCR DISPLAY
+========================================================= */
+
+function renderOCRNumbers(){
+
+const box=
+document.getElementById('ocrResult');
+
+const container=
+document.getElementById('ocrNumbers');
+
+if(ocrNumbers.length===0){
+
+box.style.display='none';
+
+return;
+
+}
+
+box.style.display='block';
+
+container.innerHTML='';
+
+ocrNumbers.forEach((n,index)=>{
+
+const el=
+document.createElement('button');
+
+el.className=
+'ocr-number '+
+getColorClass(n);
+
+if(selectedOCRNumbers.includes(index)){
+el.classList.add('selected');
+}
+
+el.textContent=n;
+
+el.onclick=function(){
+
+const pos=
+selectedOCRNumbers.indexOf(index);
+
+if(pos>=0){
+
+selectedOCRNumbers.splice(pos,1);
+
+}
+else{
+
+selectedOCRNumbers.push(index);
+
+}
+
+renderOCRNumbers();
+
+};
+
+container.appendChild(el);
+
+});
+
+}
+
+
+/* =========================================================
+   OCR SELECTION
+========================================================= */
+
+function selectAllOCR(){
+
+selectedOCRNumbers=
+ocrNumbers.map(
+(_,index)=>index
+);
+
+renderOCRNumbers();
+
+}
+
+
+function clearOCRSelection(){
+
+selectedOCRNumbers=[];
+
+renderOCRNumbers();
+
+}
+
+
+function punchOCRNumbers(){
+
+if(selectedOCRNumbers.length===0){
+
+alert('कम से कम एक number select करें।');
+
+return;
+
+}
+
+
+/*
+OCR output is Latest → Oldest.
+
+Existing system stores newest number at index 0.
+इसलिए selected list को reverse नहीं करना है।
+*/
+
+const selected=
+selectedOCRNumbers
+.sort((a,b)=>a-b)
+.map(index=>ocrNumbers[index]);
+
+if(selected.length===0)
+return;
+
+
+/*
+Image batch को history के आगे जोड़ना है।
+*/
+
+spins=[
+...selected,
+...spins
+];
+
+spins=
+spins.slice(0,500);
+
+saveSpins();
+
+renderAll();
+
+document
+.getElementById('ocrStatus')
+.textContent=
+`✅ ${selected.length} numbers history में punch हो गए।`;
+
+clearOCRSelection();
+
+}
+
+
+/* =========================================================
+   CUSTOM RULE ENGINE
+========================================================= */
+
+function evaluateCustomRules(
+windowSpins,
+scores,
+reasons,
+alerts,
+activeRuleIds
+){
+
+if(
+windowSpins.length===0 ||
+customRules.length===0
+)
+return;
+
+const latest=
+windowSpins[0];
+
+const second=
+windowSpins[1];
+
+const third=
+windowSpins[2];
+
+
+customRules.forEach(rule=>{
+
+if(!rule.enabled)
+return;
+
+let triggered=false;
+
+let triggerDesc='';
+
+
+if(rule.type==='AFTER_NUM'){
+
+if(rule.triggerNums.includes(latest)){
+
+triggered=true;
+
+triggerDesc=
+`Latest spin ${latest} matches [${rule.triggerNums.join(', ')}]`;
+
+}
+
+}
+
+
+else if(rule.type==='REPEAT_X'){
+
+if(
+second!==undefined &&
+latest===second
+){
+
+if(
+rule.triggerNums.length===0 ||
+rule.triggerNums.includes(latest)
+){
+
+triggered=true;
+
+triggerDesc=
+`Repeater ${latest} → ${latest} detected`;
+
+}
+
+}
+
+}
+
+
+else if(rule.type==='SANDWICH_ABA'){
+
+if(
+(second!==undefined && latest===second) ||
+(third!==undefined && latest===third)
+){
+
+triggered=true;
+
+triggerDesc=
+`Mirror/Sandwich pattern matched around ${latest}`;
+
+}
+
+}
+
+
+else if(rule.type==='COLOR_STREAK'){
+
+const config=
+rule.streakConfig ||
+{
+color:'RED',
+count:3
+};
+
+let streak=0;
+
+for(const n of windowSpins){
+
+if(getColor(n)===config.color)
+streak++;
+
+else
+break;
+
+}
+
+if(streak>=config.count){
+
+triggered=true;
+
+triggerDesc=
+`${streak}x ${config.color} streak active`;
+
+}
+
+}
+
+
+else if(rule.type==='DOZEN_HIT'){
+
+const d=
+rule.dozen||1;
+
+const inDozen=
+(
+d===1 &&
+latest>=1 &&
+latest<=12
+) ||
+(
+d===2 &&
+latest>=13 &&
+latest<=24
+) ||
+(
+d===3 &&
+latest>=25 &&
+latest<=36
+);
+
+if(inDozen){
+
+triggered=true;
+
+triggerDesc=
+`Latest ${latest} is in Dozen ${d}`;
+
+}
+
+}
+
+
+if(triggered){
+
+activeRuleIds.add(rule.id);
+
+alerts.push(`
+
+<div class="alert-box user-hit">
+
+🧠
+<strong>
+User Rule Triggered
+(${rule.name||rule.type}):
+</strong>
+
+${triggerDesc}
+
+→ Suggesting
+[${rule.targets.join(', ')}]
+
+</div>
+
+`);
+
+rule.targets.forEach(tNum=>{
+
+scores[tNum]+=rule.weight;
+
+reasons[tNum].push(`
+
+<span class="src-usr">
+
+[User Rule:
+${rule.name||rule.type}]
+
+</span>
+
+${triggerDesc}
+
+`);
+
+});
+
+}
+
+});
+
+}
+
+
+/* =========================================================
+   ANALYZER
+========================================================= */
+
+function analyzePatterns(windowSpins){
+
+if(windowSpins.length===0){
+
+return{
+candidates:[],
+alerts:[],
+activeRuleIds:new Set()
+};
+
+}
+
+const scores={};
+const reasons={};
+
+for(let i=0;i<=36;i++){
+
+scores[i]=0;
+reasons[i]=[];
+
+}
+
+
+const freq={};
+
+windowSpins.forEach(n=>{
+freq[n]=(freq[n]||0)+1;
+});
+
+
+const latest=
+windowSpins[0];
+
+const second=
+windowSpins[1];
+
+const alerts=[];
+
+const activeRuleIds=
+new Set();
+
+
+/* 1 Repeater */
+
+scores[latest]+=22;
+
+reasons[latest].push(`
+
+<span class="src-sys">
+[System Repeater]
+</span>
+
+Latest ${latest} repeat watch
+
+`);
+
+ 
+/* 2 Sandwich */
+
+if(second!==undefined){
+
+scores[second]+=24;
+
+reasons[second].push(`
+
+<span class="src-sys">
+[System Sandwich]
+</span>
+
+Mirror setup
+
+`);
+
+alerts.push(`
+
+<div class="alert-box">
+
+🔄
+<strong>
+System Mirror Watch:
+</strong>
+
+Latest
+<b>${latest}</b>
+
+ke pehle
+<b>${second}</b>
+tha.
+
+</div>
+
+`);
+
+}
+
+
+/* 3 Sequence */
+
+if(windowSpins.length>=4){
+
+for(
+let i=1;
+i<Math.min(
+windowSpins.length-1,
+35
+);
+i++
+){
+
+if(windowSpins[i]===latest){
+
+const follower=
+windowSpins[i-1];
+
+scores[follower]+=18;
+
+reasons[follower].push(`
+
+<span class="src-sys">
+[System Sequence]
+</span>
+
+Earlier after ${latest},
+next was ${follower}
+
+`);
+
+break;
+
+}
+
+}
+
+}
+
+
+/* 4 Wheel */
+
+const detailedNeighbors=
+getWheelNeighborsDetailed(
+latest,
+6
+);
+
+
+detailedNeighbors.forEach(nb=>{
+
+if(nb.step<=3){
+
+const pts=
+nb.step===1
+?18
+:nb.step===2
+?14
+:10;
+
+scores[nb.num]+=pts;
+
+reasons[nb.num].push(`
+
+<span class="src-whl">
+[Wheel Neighbor]
+</span>
+
+${nb.label}
+
+`);
+
+}
+
+});
+
+
+/* 5 Frequency */
+
+const sortedByFreq=
+Object.entries(freq)
+.sort((a,b)=>b[1]-a[1]);
+
+
+sortedByFreq
+.slice(0,6)
+.forEach(([numStr,count],rank)=>{
+
+const n=
+parseInt(numStr,10);
+
+scores[n]+=
+14-rank*2;
+
+reasons[n].push(`
+
+<span class="src-sys">
+[System Frequency]
+</span>
+
+${count} hits
+
+`);
+
+});
+
+
+/* 6 Dozen */
+
+if(windowSpins.length>=6){
+
+const recent6=
+windowSpins.slice(0,6);
+
+const d1=
+recent6.filter(x=>x>=1&&x<=12).length;
+
+const d2=
+recent6.filter(x=>x>=13&&x<=24).length;
+
+const d3=
+recent6.filter(x=>x>=25&&x<=36).length;
+
+
+if(d1>=4){
+
+alerts.push(`
+
+<div class="alert-box">
+
+⚖️
+<strong>
+System Dozen Shift:
+</strong>
+
+1st Dozen
+${d1}
+times
+
+</div>
+
+`);
+
+}
+
+
+if(d2>=4){
+
+alerts.push(`
+
+<div class="alert-box">
+
+⚖️
+<strong>
+System Dozen Shift:
+</strong>
+
+2nd Dozen
+${d2}
+times
+
+</div>
+
+`);
+
+}
+
+
+if(d3>=4){
+
+alerts.push(`
+
+<div class="alert-box">
+
+⚖️
+<strong>
+System Dozen Shift:
+</strong>
+
+3rd Dozen
+${d3}
+times
+
+</div>
+
+`);
+
+}
+
+}
+
+
+/* Custom */
+
+evaluateCustomRules(
+windowSpins,
+scores,
+reasons,
+alerts,
+activeRuleIds
+);
+
+
+/* Ranking */
+
+const ranked=
+Object.keys(scores)
+.map(k=>({
+
+num:parseInt(k,10),
+score:scores[k],
+reasons:reasons[k]
+
+}))
+.sort((a,b)=>b.score-a.score);
+
+
+const candidates=
+ranked
+.filter(x=>x.reasons.length>0)
+.slice(0,6);
+
+
+/* Fill */
+
+for(const nb of detailedNeighbors){
+
+if(candidates.length>=6)
+break;
+
+if(
+!candidates.some(
+c=>c.num===nb.num
+)
+){
+
+candidates.push({
+
+num:nb.num,
+
+score:
+scores[nb.num]+
+(8-nb.step),
+
+reasons:[
+
+...reasons[nb.num],
+
+`<span class="src-whl">
+[Wheel Neighbor Fill]
+</span>
+
+${nb.label}`
+
+]
+
+});
+
+}
+
+}
+
+
+return{
+candidates:candidates.slice(0,6),
+alerts,
+activeRuleIds
+};
+
+}
+
+
+/* =========================================================
+   RULE LIST
+========================================================= */
+
+function renderCustomRulesList(
+activeRuleIds
+){
+
+const el=
+document.getElementById(
+'customRulesList'
+);
+
+document
+.getElementById('ruleCountBadge')
+.textContent=
+`${customRules.length} Custom Rules`;
+
+
+if(customRules.length===0){
+
+el.innerHTML=`
+
+<div style="
+font-size:.8rem;
+color:var(--muted);
+padding:8px">
+
+Abhi koi custom rule nahi hai.
+
+</div>
+
+`;
+
+return;
+
+}
+
+
+el.innerHTML=
+customRules.map(r=>{
+
+const isActive=
+activeRuleIds.has(r.id);
+
+const condSummary=
+r.type==='AFTER_NUM'
+?`Latest in [${r.triggerNums.join(',')}]`
+:r.type==='REPEAT_X'
+?`Repeater (${r.triggerNums.length?r.triggerNums.join(','):'Any'})`
+:r.type==='SANDWICH_ABA'
+?`Mirror/Sandwich`
+:r.type==='COLOR_STREAK'
+?`${r.streakConfig.count}x ${r.streakConfig.color}`
+:`Dozen ${r.dozen}`;
+
+
+return `
+
+<div class="rule-chip
+${isActive?'active-rule':''}">
+
+<div class="rule-chip-text">
+
+<strong>
+${r.name||r.type}
+</strong>
+
+${isActive
+?'<span style="color:var(--purple)">• TRIGGERED</span>'
+:''}
+
+<br>
+
+<span style="color:var(--muted)">
+
+If:
+${condSummary}
+
+→ Hint:
+[${r.targets.join(', ')}]
+
+(Wt: ${r.weight})
+
+</span>
+
+</div>
+
+<div style="display:flex;gap:4px">
+
+<button
+style="padding:4px 7px;font-size:.72rem"
+onclick="toggleRule('${r.id}')">
+
+${r.enabled?'ON':'OFF'}
+
+</button>
+
+<button
+class="danger"
+style="padding:4px 7px;font-size:.72rem"
+onclick="deleteRule('${r.id}')">
+
+✕
+
+</button>
+
+</div>
+
+</div>
+
+`;
+
+}).join('');
+
+}
+
+
+/* =========================================================
+   RENDER
+========================================================= */
+
+function renderAll(){
+
+const winSize=
+parseInt(
+document.getElementById(
+'windowSlider'
+).value,
+10
+);
+
+
+document.getElementById(
+'sliderVal'
+).textContent=
+winSize;
+
+
+document.getElementById(
+'totalCountBadge'
+).textContent=
+`${spins.length} Spins`;
+
+
+document.getElementById(
+'windowLabel'
+).textContent=
+`LAST ${Math.min(winSize,spins.length)} ROUNDS`;
+
+
+const activeSpins=
+spins.slice(0,winSize);
+
+
+/* Latest */
+
+const strip=
+document.getElementById(
+'latestStrip'
+);
+
+
+if(activeSpins.length===0){
+
+strip.innerHTML=`
+
+<span class="strip-label">
+
+Empty — Keypad ya Screenshot use karein
+
+</span>
+
+`;
+
+}
+else{
+
+strip.innerHTML=
+
+`<span class="strip-label">
+Latest →
+</span>`+
+
+activeSpins
+.slice(0,16)
+.map((n,idx)=>`
+
+<span class="num-pill
+${getColorClass(n)}
+${idx===0?'latest':''}">
+
+${n}
+
+</span>
+
+`)
+.join('');
+
+}
+
+
+/* Hints */
+
+const quickHintsBar=
+document.getElementById(
+'quickHintsBar'
+);
+
+const alertsEl=
+document.getElementById(
+'patternAlerts'
+);
+
+const hintsEl=
+document.getElementById(
+'hintsContainer'
+);
+
+
+if(activeSpins.length===0){
+
+quickHintsBar.innerHTML='';
+
+alertsEl.innerHTML='';
+
+hintsEl.innerHTML=`
+
+<div class="empty-state">
+
+Abhi koi number feed nahi hai.
+
+<br>
+
+Numbers punch karein.
+
+</div>
+
+`;
+
+renderCustomRulesList(
+new Set()
+);
+
+}
+else{
+
+const {
+candidates,
+alerts,
+activeRuleIds
+}=analyzePatterns(
+activeSpins
+);
+
+
+quickHintsBar.innerHTML=`
+
+<div class="quick-hints-bar">
+
+<span class="quick-hints-title">
+6 Hints:
+</span>
+
+${candidates
+.map(c=>`
+
+<span class="num-pill
+${getColorClass(c.num)}">
+
+${c.num}
+
+</span>
+
+`)
+.join('')}
+
+</div>
+
+`;
+
+
+alertsEl.innerHTML=
+alerts.join('');
+
+
+renderCustomRulesList(
+activeRuleIds
+);
+
+
+hintsEl.innerHTML=
+candidates
+.map((c,idx)=>`
+
+<div class="hint-item">
+
+<span class="num-pill
+${getColorClass(c.num)}">
+
+${c.num}
+
+</span>
+
+<div class="hint-info">
+
+<div class="hint-header">
+
+<span class="hint-tag">
+
+Hint #${idx+1}
+•
+${getColor(c.num)}
+
+</span>
+
+<span class="hint-score">
+
+Score:
+${c.score}
+
+</span>
+
+</div>
+
+<div class="hint-reason">
+
+<strong>
+Logic:
+</strong>
+
+${c.reasons.join(' • ')}
+
+</div>
+
+</div>
+
+</div>
+
+`)
+.join('');
+
+}
+
+
+/* Matrix */
+
+const matrix=
+document.getElementById(
+'matrixGrid'
+);
+
+
+if(activeSpins.length===0){
+
+matrix.innerHTML=`
+
+<div style="
+grid-column:1/-1;
+text-align:center;
+padding:16px;
+color:var(--muted)">
+
+0 numbers in history
+
+</div>
+
+`;
+
+}
+else{
+
+matrix.innerHTML=
+activeSpins
+.slice(0,180)
+.map((n,idx)=>`
+
+<div class="matrix-cell
+${getColorClass(n)}
+${idx===0?'first':''}">
+
+${n}
+
+</div>
+
+`)
+.join('');
+
+}
+
+
+/* Stats */
+
+const reds=
+activeSpins.filter(
+n=>RED_NUMS.has(n)
+).length;
+
+
+const blacks=
+activeSpins.filter(
+n=>n!==0&&!RED_NUMS.has(n)
+).length;
+
+
+const zeros=
+activeSpins.filter(
+n=>n===0
+).length;
+
+
+const total=
+activeSpins.length;
+
+
+document.getElementById(
+'outsideStats'
+).innerHTML=`
+
+<div class="stat-box">
+
+<div class="val">
+
+${total
+?((reds/total)*100).toFixed(1)
+:'0.0'}%
+
+</div>
+
+<div class="lbl">
+RED (${reds})
+</div>
+
+</div>
+
+
+<div class="stat-box">
+
+<div class="val">
+
+${total
+?((blacks/total)*100).toFixed(1)
+:'0.0'}%
+
+</div>
+
+<div class="lbl">
+BLACK (${blacks})
+</div>
+
+</div>
+
+
+<div class="stat-box">
+
+<div class="val">
+
+${total
+?((zeros/total)*100).toFixed(1)
+:'0.0'}%
+
+</div>
+
+<div class="lbl">
+ZERO (${zeros})
+</div>
+
+</div>
+
+`;
+
+}
+
+
+/* =========================================================
+   KEYPAD
+========================================================= */
+
+function buildKeypad(){
+
+const pad=
+document.getElementById(
+'keypad'
+);
+
+let html='';
+
+for(let i=0;i<=36;i++){
+
+html+=`
+
+<button
+class="key-btn ${getColorClass(i)}"
+onclick="punchNumber(${i})">
+
+${i}
+
+</button>
+
+`;
+
+}
+
+pad.innerHTML=html;
+
+}
+
+
+/* =========================================================
+   BULK
+========================================================= */
+
+function openBulkModal(){
+
+document
+.getElementById('bulkModal')
+.classList.add('open');
+
+}
+
+
+function closeBulkModal(){
+
+document
+.getElementById('bulkModal')
+.classList.remove('open');
+
+}
+
+
+function applyBulkImport(){
+
+const raw=
+document.getElementById(
+'bulkText'
+).value;
+
+
+const parsed=
+raw
+.split(/[\s,;|\n]+/)
+.map(s=>parseInt(s.trim(),10))
+.filter(
+n=>!isNaN(n)&&
+n>=0&&
+n<=36
+);
+
+
+if(parsed.length>0){
+
+spins=
+parsed.slice(0,500);
+
+saveSpins();
+
+renderAll();
+
+closeBulkModal();
+
+}
+
+}
+
+
+/* =========================================================
+   RULE MODAL
+========================================================= */
+
+function openRuleModal(){
+
+toggleRuleConditionInputs();
+
+document
+.getElementById('ruleModal')
+.classList.add('open');
+
+}
+
+
+function closeRuleModal(){
+
+document
+.getElementById('ruleModal')
+.classList.remove('open');
+
+}
+
+
+function toggleRuleConditionInputs(){
+
+const type=
+document.getElementById(
+'ruleType'
+).value;
+
+
+document.getElementById(
+'condNumbersGroup'
+).style.display=
+(
+type==='AFTER_NUM' ||
+type==='REPEAT_X'
+)
+?'block'
+:'none';
+
+
+document.getElementById(
+'condStreakGroup'
+).style.display=
+type==='COLOR_STREAK'
+?'block'
+:'none';
+
+
+document.getElementById(
+'condDozenGroup'
+).style.display=
+type==='DOZEN_HIT'
+?'block'
+:'none';
+
+}
+
+
+function parseNumList(str){
+
+return str
+.split(/[\s,;|\n]+/)
+.map(s=>parseInt(s.trim(),10))
+.filter(
+n=>!isNaN(n)&&
+n>=0&&
+n<=36
+);
+
+}
+
+
+function saveCustomRule(){
+
+const type=
+document.getElementById(
+'ruleType'
+).value;
+
+
+const name=
+document.getElementById(
+'ruleName'
+).value.trim();
+
+
+const targets=
+parseNumList(
+document.getElementById(
+'targetNumbers'
+).value
+);
+
+
+const weight=
+Math.max(
+10,
+Math.min(
+50,
+parseInt(
+document.getElementById(
+'ruleWeight'
+).value,
+10
+)||28
+)
+);
+
+
+if(targets.length===0){
+
+alert('Target numbers डालें।');
+
+return;
+
+}
+
+
+const triggerNums=
+parseNumList(
+document.getElementById(
+'condNumbers'
+).value
+);
+
+
+const streakRaw=
+document.getElementById(
+'condStreak'
+).value
+.trim()
+.toUpperCase();
+
+
+const parts=
+streakRaw.split(':');
+
+
+const streakConfig={
+
+color:
+parts[0]==='BLACK'
+?'BLACK'
+:'RED',
+
+count:
+Math.max(
+2,
+parseInt(parts[1],10)||3
+)
+
+};
+
+
+const dozen=
+parseInt(
+document.getElementById(
+'condDozen'
+).value,
+10
+)||1;
+
+
+customRules.unshift({
+
+id:
+'rule_'+Date.now(),
+
+name,
+
+type,
+
+triggerNums,
+
+streakConfig,
+
+dozen,
+
+targets,
+
+weight,
+
+enabled:true
+
+});
+
+
+saveRules();
+
+
+document.getElementById(
+'ruleName'
+).value='';
+
+
+document.getElementById(
+'condNumbers'
+).value='';
+
+
+document.getElementById(
+'targetNumbers'
+).value='';
+
+
+closeRuleModal();
+
+renderAll();
+
+}
+
+
+function toggleRule(id){
+
+const r=
+customRules.find(
+x=>x.id===id
+);
+
+if(r){
+
+r.enabled=!r.enabled;
+
+saveRules();
+
+renderAll();
+
+}
+
+}
+
+
+function deleteRule(id){
+
+customRules=
+customRules.filter(
+x=>x.id!==id
+);
+
+saveRules();
+
+renderAll();
+
+}
+
+
+/* =========================================================
+   IMAGE CLEAR
+========================================================= */
+
+function clearImageOCR(){
+
+selectedImageFile=null;
+
+ocrNumbers=[];
+
+selectedOCRNumbers=[];
+
+
+const input=
+document.getElementById(
+'rouletteImage'
+);
+
+input.value='';
+
+
+const preview=
+document.getElementById(
+'imagePreview'
+);
+
+preview.src='';
+
+preview.style.display='none';
+
+
+document.getElementById(
+'ocrResult'
+).style.display='none';
+
+
+document.getElementById(
+'ocrButton'
+).disabled=true;
+
+
+document.getElementById(
+'ocrStatus'
+).textContent=
+'Image select करने के बाद "Read Numbers" दबाएं।';
+
+}
+
+
+/* =========================================================
+   INITIALIZE
+========================================================= */
+
+buildKeypad();
+
+renderAll();
+
 </script>
+
 </body>
 </html>
