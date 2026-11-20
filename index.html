@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Roulette Pattern & Next-Number Hint Analyzer</title>
+  <title>Roulette Pattern & Next-Number Hint Analyzer (6 Hints)</title>
   <style>
     :root {
       --bg: #0f1115;
@@ -64,6 +64,14 @@
     .c-black { background: var(--black); color: #e5e7eb; border: 1px solid #374151; }
     .c-green { background: var(--green); color: #fff; }
 
+    /* Quick 6-Hint Bar */
+    .quick-hints-bar {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+      background: rgba(45, 212, 191, 0.06); border: 1px solid rgba(45, 212, 191, 0.25);
+      border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+    }
+    .quick-hints-title { font-size: 0.76rem; font-weight: 700; color: var(--accent); text-transform: uppercase; margin-right: 4px; }
+
     /* Layout Grid */
     .main-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px; }
     @media (max-width: 860px) { .main-grid { grid-template-columns: 1fr; } }
@@ -83,6 +91,7 @@
     .hint-reason { font-size: 0.82rem; color: #d1d5db; line-height: 1.4; }
     .src-sys { color: var(--accent); font-weight: 600; }
     .src-usr { color: var(--purple); font-weight: 600; }
+    .src-whl { color: #fbbf24; font-weight: 600; }
 
     /* Pattern Alerts */
     .alert-box {
@@ -176,13 +185,14 @@
 <div class="latest-strip" id="latestStrip"></div>
 
 <div class="main-grid">
-  <!-- Left: Unified Hints + User Rules + Keypad -->
+  <!-- Left: 6 Unified Hints + User Rules + Keypad -->
   <div style="display:flex; flex-direction:column; gap:14px;">
     <div class="card">
       <div class="card-title">
-        <span>🎯 Next-Number Hints (System + User Patterns)</span>
-        <span style="font-size:0.74rem; color:var(--muted);">True Odds: 1/37 (2.70%)</span>
+        <span>🎯 Top 6 Next-Number Hints & Logic</span>
+        <span style="font-size:0.74rem; color:var(--muted);">Single Odds: 2.70% | 6-Num Coverage: 16.22%</span>
       </div>
+      <div id="quickHintsBar"></div>
       <div id="patternAlerts"></div>
       <div id="hintsContainer"></div>
     </div>
@@ -243,7 +253,7 @@
   <div class="modal">
     <h3 style="font-size:1rem; color:var(--purple);">⚙️ Add User Pattern / Prediction Rule</h3>
     <p style="font-size:0.78rem; color:var(--muted); margin-top:3px; margin-bottom:10px;">
-      Apna pattern ya trigger logic define karein — har naye spin par system aur aapke rules dono milkar next-number hints banayenge.
+      Apna pattern ya trigger logic define karein — har naye spin par system aur aapke rules dono milkar 6 next-number hints banayenge.
     </p>
 
     <div class="form-group">
@@ -283,7 +293,7 @@
 
     <div class="form-group">
       <label>Hint / Target Numbers to Suggest (0–36, comma separated)</label>
-      <input type="text" id="targetNumbers" placeholder="e.g., 26, 32, 19, 8" />
+      <input type="text" id="targetNumbers" placeholder="e.g., 26, 32, 19, 8, 15, 0" />
     </div>
 
     <div class="form-group">
@@ -315,9 +325,8 @@
     35,10,2,30,25,28,36,26,1,35,22
   ];
 
-  let savedRaw = localStorage.getItem('roulette_spins_v3');
+  let savedRaw = localStorage.getItem('roulette_spins_v5');
   let spins = savedRaw !== null ? JSON.parse(savedRaw) : [...DEFAULT_SPINS];
-
   let customRules = JSON.parse(localStorage.getItem('roulette_custom_rules_v1') || '[]');
 
   function getColor(n) {
@@ -330,20 +339,31 @@
     return RED_NUMS.has(n) ? 'c-red' : 'c-black';
   }
 
-  function getWheelNeighbors(num, radius = 2) {
+  // Returns wheel neighbors with exact slot distance & direction relative to `num`
+  function getWheelNeighborsDetailed(num, maxRadius = 6) {
     const idx = WHEEL_ORDER.indexOf(num);
     if (idx === -1) return [];
     const res = [];
-    for (let offset = -radius; offset <= radius; offset++) {
-      if (offset === 0) continue;
-      const targetIdx = (idx + offset + WHEEL_ORDER.length) % WHEEL_ORDER.length;
-      res.push(WHEEL_ORDER[targetIdx]);
+    for (let step = 1; step <= maxRadius; step++) {
+      const rightIdx = (idx + step) % WHEEL_ORDER.length;
+      const leftIdx = (idx - step + WHEEL_ORDER.length) % WHEEL_ORDER.length;
+      const ord = step === 1 ? '1st' : step === 2 ? '2nd' : step === 3 ? '3rd' : `${step}th`;
+      res.push({
+        num: WHEEL_ORDER[rightIdx],
+        step,
+        label: `${ord} Right of wheel #${num}`
+      });
+      res.push({
+        num: WHEEL_ORDER[leftIdx],
+        step,
+        label: `${ord} Left of wheel #${num}`
+      });
     }
     return res;
   }
 
   function saveSpins() {
-    localStorage.setItem('roulette_spins_v3', JSON.stringify(spins.slice(0, 500)));
+    localStorage.setItem('roulette_spins_v5', JSON.stringify(spins.slice(0, 500)));
   }
 
   function saveRules() {
@@ -476,15 +496,13 @@
     const activeRuleIds = new Set();
 
     // 1. System: Direct Repeater (X -> X)
-    if (latest !== undefined) {
-      scores[latest] += 22;
-      reasons[latest].push(`<span class="src-sys">[System]</span> Repeater watch (${latest} → ${latest})`);
-    }
+    scores[latest] += 22;
+    reasons[latest].push(`<span class="src-sys">[System Repeater]</span> Latest ${latest} repeat watch (${latest} → ${latest})`);
 
     // 2. System: Sandwich / Mirror Pattern (A - B - A)
     if (second !== undefined) {
       scores[second] += 24;
-      reasons[second].push(`<span class="src-sys">[System]</span> Mirror/Sandwich (${second} - ${latest} - ${second})`);
+      reasons[second].push(`<span class="src-sys">[System Sandwich]</span> Mirror setup (${second} - ${latest} - ${second})`);
       alerts.push(`<div class="alert-box">🔄 <strong>System Mirror Watch:</strong> Latest <b>${latest}</b> ke pehle <b>${second}</b> tha — agar <b>${second}</b> aata hai toh <code>${second}-${latest}-${second}</code> sandwich banega.</div>`);
     }
 
@@ -494,28 +512,30 @@
         if (windowSpins[i] === latest && windowSpins[i - 1] !== undefined) {
           const follower = windowSpins[i - 1];
           scores[follower] += 18;
-          reasons[follower].push(`<span class="src-sys">[System]</span> Follow-up after ${latest} was ${follower}`);
+          reasons[follower].push(`<span class="src-sys">[System Sequence]</span> Earlier after ${latest}, next was ${follower}`);
           break;
         }
       }
     }
 
-    // 4. System: European Wheel Neighbors
-    const neighbors = getWheelNeighbors(latest, 2);
-    neighbors.forEach((nb, idx) => {
-      const pts = idx < 2 ? 16 : 12;
-      scores[nb] += pts;
-      reasons[nb].push(`<span class="src-sys">[System]</span> Wheel neighbor of ${latest}`);
+    // 4. System: Wheel Neighbors (detailed slot & direction logic)
+    const wheelMetaMap = {};
+    const detailedNeighbors = getWheelNeighborsDetailed(latest, 6);
+    detailedNeighbors.forEach(nb => {
+      if (!wheelMetaMap[nb.num]) wheelMetaMap[nb.num] = nb.label;
+      if (nb.step <= 3) {
+        const pts = nb.step === 1 ? 18 : (nb.step === 2 ? 14 : 10);
+        scores[nb.num] += pts;
+        reasons[nb.num].push(`<span class="src-whl">[Wheel Neighbor]</span> ${nb.label}`);
+      }
     });
 
     // 5. System: Hot Frequency Weight
     const sortedByFreq = Object.entries(freq).sort((a, b) => b[1] - a[1]);
-    sortedByFreq.slice(0, 5).forEach(([numStr, count], rank) => {
+    sortedByFreq.slice(0, 6).forEach(([numStr, count], rank) => {
       const n = parseInt(numStr, 10);
-      if (count >= 2) {
-        scores[n] += (15 - rank * 2);
-        reasons[n].push(`<span class="src-sys">[System]</span> Hot (${count}x in ${windowSpins.length} spins)`);
-      }
+      scores[n] += (14 - rank * 2);
+      reasons[n].push(`<span class="src-sys">[System Frequency]</span> ${count} hits in last ${windowSpins.length} spins`);
     });
 
     // 6. System: Dozen Reversion Alert
@@ -529,16 +549,31 @@
       if (d3 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>System Dozen Shift:</strong> Last 6 spins mein 3rd Dozen (25–36) ${d3} baar aaya hai.</div>`);
     }
 
-    // 7. Merge User Custom Rules into Prediction & Alerts
+    // 7. Merge User Custom Rules
     evaluateCustomRules(windowSpins, scores, reasons, alerts, activeRuleIds);
 
-    const candidates = Object.keys(scores)
+    // Rank top 6 and fill any remaining slots via getWheelNeighbors with explicit wheel logic
+    const ranked = Object.keys(scores)
       .map(k => ({ num: parseInt(k, 10), score: scores[k], reasons: reasons[k] }))
-      .filter(item => item.reasons.length > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 8);
+      .sort((a, b) => b.score - a.score);
 
-    return { candidates, alerts, activeRuleIds };
+    const candidates = ranked.filter(x => x.reasons.length > 0).slice(0, 6);
+
+    for (const nb of detailedNeighbors) {
+      if (candidates.length >= 6) break;
+      if (!candidates.some(c => c.num === nb.num)) {
+        candidates.push({
+          num: nb.num,
+          score: scores[nb.num] + (8 - nb.step),
+          reasons: [
+            ...reasons[nb.num],
+            `<span class="src-whl">[Wheel Neighbor Fill]</span> Selected via getWheelNeighbors — ${nb.label}`
+          ]
+        });
+      }
+    }
+
+    return { candidates: candidates.slice(0, 6), alerts, activeRuleIds };
   }
 
   function renderCustomRulesList(activeRuleIds) {
@@ -581,7 +616,6 @@
 
     const activeSpins = spins.slice(0, winSize);
 
-    // 1. Latest Strip
     const strip = document.getElementById('latestStrip');
     if (activeSpins.length === 0) {
       strip.innerHTML = `<span class="strip-label">Empty — Keypad se number punch karein ya "Paste Numbers" use karein</span>`;
@@ -592,16 +626,23 @@
         ).join('');
     }
 
-    // 2. Unified Pattern Analysis & Hints
+    const quickHintsBar = document.getElementById('quickHintsBar');
     const alertsEl = document.getElementById('patternAlerts');
     const hintsEl = document.getElementById('hintsContainer');
 
     if (activeSpins.length === 0) {
+      quickHintsBar.innerHTML = '';
       alertsEl.innerHTML = '';
-      hintsEl.innerHTML = `<div class="empty-state">Abhi koi number feed nahi hai.<br/>Numbers punch karein — System + aapke Custom Rules dono ke hints yahan aayenge.</div>`;
+      hintsEl.innerHTML = `<div class="empty-state">Abhi koi number feed nahi hai.<br/>Numbers punch karein — 6 hinted numbers aur unka logic yahan aayega.</div>`;
       renderCustomRulesList(new Set());
     } else {
       const { candidates, alerts, activeRuleIds } = analyzePatterns(activeSpins);
+      quickHintsBar.innerHTML = `
+        <div class="quick-hints-bar">
+          <span class="quick-hints-title">6 Hints:</span>
+          ${candidates.map(c => `<span class="num-pill ${getColorClass(c.num)}">${c.num}</span>`).join('')}
+        </div>
+      `;
       alertsEl.innerHTML = alerts.join('');
       renderCustomRulesList(activeRuleIds);
 
@@ -611,15 +652,14 @@
           <div class="hint-info">
             <div class="hint-header">
               <span class="hint-tag">Hint #${idx + 1} • ${getColor(c.num)}</span>
-              <span class="hint-score">Combined Score: ${c.score} | Math: 2.70%</span>
+              <span class="hint-score">Score: ${c.score} | Single: 2.70%</span>
             </div>
-            <div class="hint-reason">${c.reasons.join(' • ')}</div>
+            <div class="hint-reason"><strong>Logic:</strong> ${c.reasons.join(' • ')}</div>
           </div>
         </div>
       `).join('');
     }
 
-    // 3. 12-Column Matrix
     const matrix = document.getElementById('matrixGrid');
     if (activeSpins.length === 0) {
       matrix.innerHTML = `<div style="grid-column: 1 / -1; text-align:center; padding:16px; color:var(--muted); font-size:0.8rem;">0 numbers in history</div>`;
@@ -629,7 +669,6 @@
       ).join('');
     }
 
-    // 4. Outside Stats
     const reds = activeSpins.filter(n => RED_NUMS.has(n)).length;
     const blacks = activeSpins.filter(n => n !== 0 && !RED_NUMS.has(n)).length;
     const zeros = activeSpins.filter(n => n === 0).length;
