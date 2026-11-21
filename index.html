@@ -913,6 +913,345 @@
     // Method 8: User Custom Rules
     evaluateCustomRules(windowSpins, scores, reasons, alerts, activeRuleIds);
 
+    // Method 9: Digit-Swap Mirror (31↔13), Ending Series (1-11-21-31, 7-17-27, 8-18-28, etc.), 6-9 Family & 2nd-Col Odd Series (11,17,29,35)
+    const SERIES_BY_END = {
+      0: [0, 10, 20, 30],
+      1: [1, 11, 21, 31],
+      2: [2, 12, 22, 32],
+      3: [3, 13, 23, 33],
+      4: [4, 14, 24, 34],
+      5: [5, 15, 25, 35],
+      6: [6, 16, 26, 36],
+      7: [7, 17, 27],
+      8: [8, 18, 28],
+      9: [9, 19, 29]
+    };
+    const COL2_ALL = new Set([2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35]);
+    const COL2_ODD = [5, 11, 17, 23, 29, 35];
+    const SIX_NINE_FAMILY = [6, 9, 16, 19, 26, 29, 36];
+
+    function getDigitSwapMirror(num) {
+      if (num < 10 || num > 36) return null;
+      const tens = Math.floor(num / 10);
+      const units = num % 10;
+      if (units === 0) return null;
+      const swapped = units * 10 + tens;
+      return (swapped >= 0 && swapped <= 36 && swapped !== num) ? swapped : null;
+    }
+
+    const activeSeriesHints = [];
+
+    // 9A. Digit-Swap Mirror (e.g. 31 <-> 13, 12 <-> 21, 23 <-> 32)
+    const swapNum = getDigitSwapMirror(latest);
+    const isRepeaterLatest = (second !== undefined && latest === second);
+    if (swapNum !== null) {
+      const swapBoost = isRepeaterLatest ? 28 : 19;
+      scores[swapNum] += swapBoost;
+      reasons[swapNum].push(`<span class="src-sys">[M9: Digit Mirror]</span> Swap of #${latest} → #${swapNum}${isRepeaterLatest ? ' (after repeater)' : ''}`);
+      alerts.push(`<div class="alert-box">🔀 <strong>Digit Mirror Watch:</strong> Latest <b>${latest}</b>${isRepeaterLatest ? ' (repeater)' : ''} ka digit-swap mirror <b>${swapNum}</b> active (${latest} ↔ ${swapNum}).</div>`);
+    }
+
+    // 9B. Ending Digit Series (e.g. 1-11-21-31, 4-14-24-34, 5-15-25-35, 7-17-27, 8-18-28)
+    const endDigit = latest % 10;
+    const endSeriesNums = SERIES_BY_END[endDigit] || [];
+    if (endSeriesNums.length > 0) {
+      const recentSeriesHits = windowSpins.slice(0, 5).filter(x => endSeriesNums.includes(x)).length;
+      const seriesPts = recentSeriesHits >= 2 ? 17 : 11;
+      endSeriesNums.forEach(sNum => {
+        if (sNum !== latest) {
+          scores[sNum] += seriesPts;
+          reasons[sNum].push(`<span class="src-sys">[M9: Series-${endDigit}]</span> Ending-${endDigit} family [${endSeriesNums.join(' / ')}] (${recentSeriesHits}/5 recent)`);
+        }
+      });
+      const serCov = ((endSeriesNums.length / 37) * 100).toFixed(2);
+      const serProb = Math.min(25, (endSeriesNums.length / 37) * 100 * (recentSeriesHits >= 2 ? 1.15 : 1.05)).toFixed(2);
+      activeSeriesHints.push({
+        title: `🔢 Ending-${endDigit} Series (${endSeriesNums.join(' • ')})`,
+        numbers: endSeriesNums,
+        probPct: serProb,
+        covPct: serCov,
+        logic: `Numbers ending in ${endDigit} (${recentSeriesHits} hits in last 5 spins) around #${latest}.`
+      });
+    }
+
+    // 9C. 6-9 Series / Family (6, 9, 16, 19, 26, 29, 36)
+    const recent69Hits = windowSpins.slice(0, 5).filter(x => SIX_NINE_FAMILY.includes(x)).length;
+    if (SIX_NINE_FAMILY.includes(latest) || recent69Hits >= 2) {
+      const s69Pts = recent69Hits >= 2 ? 15 : 9;
+      SIX_NINE_FAMILY.forEach(n69 => {
+        if (n69 !== latest) {
+          scores[n69] += s69Pts;
+          reasons[n69].push(`<span class="src-sys">[M9: 6-9 Series]</span> 6/9 family [${SIX_NINE_FAMILY.join(', ')}]`);
+        }
+      });
+      const c69Cov = ((SIX_NINE_FAMILY.length / 37) * 100).toFixed(2);
+      const c69Prob = Math.min(28, (SIX_NINE_FAMILY.length / 37) * 100 * 1.12).toFixed(2);
+      activeSeriesHints.push({
+        title: `🎲 6–9 Series (${SIX_NINE_FAMILY.join(' • ')})`,
+        numbers: SIX_NINE_FAMILY,
+        probPct: c69Prob,
+        covPct: c69Cov,
+        logic: `Numbers ending in 6 or 9 (${recent69Hits} hits in last 5 spins).`
+      });
+    }
+
+    // 9D. 2nd Column Odd Series (focusing on 11, 17, 29, 35 + 2nd-col odd set 5, 11, 17, 23, 29, 35)
+    const recentCol2Odd = windowSpins.slice(0, 5).filter(x => COL2_ALL.has(x) && x % 2 === 1).length;
+    if (COL2_ALL.has(latest) || recentCol2Odd >= 2) {
+      const focusOddCol2 = [11, 17, 29, 35];
+      focusOddCol2.forEach(oddNum => {
+        scores[oddNum] += (recentCol2Odd >= 2 ? 16 : 10);
+        reasons[oddNum].push(`<span class="src-sys">[M9: Col-2 Odd]</span> 2nd-Column Odd series (11, 17, 29, 35)`);
+      });
+      const col2Cov = ((COL2_ODD.length / 37) * 100).toFixed(2);
+      const col2Prob = Math.min(26, (COL2_ODD.length / 37) * 100 * 1.1).toFixed(2);
+      activeSeriesHints.push({
+        title: `🏛️ 2nd Column Odd Series (Focus: 11, 17, 29, 35 • Full: ${COL2_ODD.join(', ')})`,
+        numbers: COL2_ODD,
+        probPct: col2Prob,
+        covPct: col2Cov,
+        logic: `Odd numbers in the 2nd column (2,5,8,11,14,17,20,23,26,29,32,35) with ${recentCol2Odd}/5 recent hits.`
+      });
+    }
+
+    // Method 10: Arithmetic Add/Subtract History Scan (e.g. A then B -> A+B or |A-B|, plus latest + second & |latest - second|)
+    const arithHistoryHits = [];
+    const scanLimit = Math.min(windowSpins.length - 2, 120);
+
+    for (let i = 0; i < scanLimit; i++) {
+      // In latest-first array: windowSpins[i+1] came BEFORE windowSpins[i]
+      const prevA = windowSpins[i + 1];
+      const currB = windowSpins[i];
+      if (prevA === currB) continue;
+
+      const sumAB = prevA + currB;
+      const diffAbsAB = Math.abs(prevA - currB);
+      const diffSignedAB = currB - prevA;
+
+      // Check if sumAB or diffAbsAB appeared soon after (within next 1 to 4 spins, i.e., index i-1 down to i-4)
+      for (let lookBack = 1; lookBack <= 4; lookBack++) {
+        const idxAfter = i - lookBack;
+        if (idxAfter < 0) break;
+        const observedAfter = windowSpins[idxAfter];
+
+        if (sumAB >= 0 && sumAB <= 36 && observedAfter === sumAB) {
+          arithHistoryHits.push({
+            a: prevA,
+            b: currB,
+            op: '+',
+            result: sumAB,
+            lag: lookBack,
+            spinPos: i
+          });
+        }
+        if (diffAbsAB >= 0 && diffAbsAB <= 36 && observedAfter === diffAbsAB && diffAbsAB !== sumAB) {
+          arithHistoryHits.push({
+            a: prevA,
+            b: currB,
+            op: '|A-B|',
+            result: diffAbsAB,
+            lag: lookBack,
+            spinPos: i
+          });
+        }
+      }
+    }
+
+    // Score targets from historical A + B and |A - B| occurrences
+    const arithPairSummary = new Map();
+    arithHistoryHits.slice(0, 12).forEach((h, idx) => {
+      const weight = idx < 4 ? 18 : 11;
+      scores[h.result] += weight;
+      reasons[h.result].push(`<span class="src-sys">[M10: Hist ${h.a}${h.op === '+' ? '+' : '-'}${h.b}]</span> Historical match ${h.a} → ${h.b} ⇒ ${h.result} (lag ${h.lag})`);
+      const key = `${h.a}_${h.b}`;
+      if (!arithPairSummary.has(key)) {
+        arithPairSummary.set(key, h);
+      }
+    });
+
+    // Live / Immediate Arithmetic Watch on latest two spins: second (A) then latest (B) -> A+B and |A-B|
+    if (second !== undefined && latest !== second) {
+      const liveSum = second + latest;
+      const liveDiff = Math.abs(second - latest);
+
+      if (liveSum >= 0 && liveSum <= 36) {
+        scores[liveSum] += 21;
+        reasons[liveSum].push(`<span class="src-sys">[M10: Live Add]</span> ${second} + ${latest} = ${liveSum}`);
+      }
+      if (liveDiff >= 0 && liveDiff <= 36 && liveDiff !== liveSum) {
+        scores[liveDiff] += 19;
+        reasons[liveDiff].push(`<span class="src-sys">[M10: Live Sub]</span> |${second} - ${latest}| = ${liveDiff}`);
+      }
+
+      const liveTargets = [];
+      if (liveSum >= 0 && liveSum <= 36) liveTargets.push(`${second}+${latest}=${liveSum}`);
+      if (liveDiff >= 0 && liveDiff <= 36) liveTargets.push(`|${second}-${latest}|=${liveDiff}`);
+
+      if (liveTargets.length > 0) {
+        alerts.push(
+          `<div class="alert-box">➕➖ <strong>Live Add/Sub Watch (${second} → ${latest}):</strong> ` +
+          `Calculated targets: <b>${liveTargets.join('  |  ')}</b>` +
+          `${arithPairSummary.size > 0 ? ` • History matches found: <b>${arithPairSummary.size}</b>` : ''}.</div>`
+        );
+      }
+    }
+
+    if (arithPairSummary.size > 0) {
+      const histItems = Array.from(arithPairSummary.values()).slice(0, 6);
+      const histNums = Array.from(new Set(histItems.map(x => x.result)));
+      const hCov = ((histNums.length / 37) * 100).toFixed(2);
+      const hProb = Math.min(34, (histNums.length / 37) * 100 * 1.12).toFixed(2);
+      activeSeriesHints.push({
+        title: `🧮 History Add/Sub Matches (${histItems.map(x => `${x.a}${x.op==='+'?'+':'-'}${x.b}=${x.result}`).join(', ')})`,
+        numbers: histNums,
+        probPct: hProb,
+        covPct: hCov,
+        logic: `Historical pairs (A then B) in your spin log followed by A+B or |A-B| within 1–4 spins.`
+      });
+    }
+
+    // Method 11: Auto-Detect Current Live Series, Algorithm & Odd/Even + Red/Black Bias (7-8 Focus Numbers)
+    const recentSlice = windowSpins.slice(0, Math.min(8, windowSpins.length));
+    let recentRed = 0, recentBlack = 0, recentZero = 0, recentOdd = 0, recentEven = 0;
+    recentSlice.forEach(x => {
+      const col = getColor(x);
+      if (col === 'RED') recentRed++;
+      else if (col === 'BLACK') recentBlack++;
+      else recentZero++;
+      if (x !== 0) {
+        if (x % 2 === 1) recentOdd++;
+        else recentEven++;
+      }
+    });
+
+    // Determine current Red/Black call (alternation vs streak/balance)
+    let rbCall = 'RED / BLACK';
+    let rbReason = 'Balanced recent colors';
+    if (windowSpins.length >= 2 && getColor(latest) !== 'GREEN' && getColor(second) !== 'GREEN') {
+      const cLatest = getColor(latest);
+      const cPrev = getColor(second);
+      if (cLatest !== cPrev) {
+        rbCall = cLatest === 'RED' ? 'BLACK (Zig-Zag)' : 'RED (Zig-Zag)';
+        rbReason = `Alternating ${cPrev} → ${cLatest}`;
+      } else {
+        // Same color twice in a row: either continuation or mean-reversion lean
+        rbCall = cLatest === 'RED' ? 'RED (Trend) / BLACK (Flip)' : 'BLACK (Trend) / RED (Flip)';
+        rbReason = `Back-to-back ${cLatest}`;
+      }
+    } else if (recentRed !== recentBlack) {
+      rbCall = recentRed > recentBlack ? 'BLACK (Reversion)' : 'RED (Reversion)';
+      rbReason = `Last ${recentSlice.length}: R=${recentRed}, B=${recentBlack}`;
+    }
+
+    // Determine current Odd/Even call
+    let oeCall = 'ODD / EVEN';
+    let oeReason = 'Balanced odd/even';
+    const nonZeroRecent = recentOdd + recentEven;
+    if (windowSpins.length >= 2 && latest !== 0 && second !== 0) {
+      const isOdd0 = latest % 2 === 1;
+      const isOdd1 = second % 2 === 1;
+      if (isOdd0 !== isOdd1) {
+        oeCall = isOdd0 ? 'EVEN (Zig-Zag)' : 'ODD (Zig-Zag)';
+        oeReason = `Alternating ${isOdd1 ? 'ODD' : 'EVEN'} → ${isOdd0 ? 'ODD' : 'EVEN'}`;
+      } else if (recentOdd >= recentEven + 2) {
+        oeCall = 'EVEN (Balance)';
+        oeReason = `Odd heavy (${recentOdd} Odd vs ${recentEven} Even)`;
+      } else if (recentEven >= recentOdd + 2) {
+        oeCall = 'ODD (Balance)';
+        oeReason = `Even heavy (${recentEven} Even vs ${recentOdd} Odd)`;
+      } else {
+        oeCall = isOdd0 ? 'ODD (Follow)' : 'EVEN (Follow)';
+        oeReason = `Last spin ${latest} is ${isOdd0 ? 'ODD' : 'EVEN'}`;
+      }
+    } else if (nonZeroRecent > 0 && recentOdd !== recentEven) {
+      oeCall = recentOdd > recentEven ? 'EVEN (Balance)' : 'ODD (Balance)';
+      oeReason = `Recent Odd=${recentOdd}, Even=${recentEven}`;
+    }
+
+    // Auto-detect strongest active series & algorithm right now
+    let detectedAlgoName = 'Multi-Signal Blend';
+    let detectedSeriesName = `Ending-${latest % 10} Series`;
+    const seedPool = [];
+
+    // Check if an active series or arithmetic pair or digit mirror is leading right now
+    const recent5 = windowSpins.slice(0, 5);
+    let bestSeriesEntry = null;
+    let bestSeriesScore = -1;
+    for (const [dStr, arr] of Object.entries(SERIES_BY_END)) {
+      const hits5 = recent5.filter(x => arr.includes(x)).length;
+      const containsLatest = arr.includes(latest) ? 1 : 0;
+      const sScore = hits5 * 3 + containsLatest * 2;
+      if (sScore > bestSeriesScore) {
+        bestSeriesScore = sScore;
+        bestSeriesEntry = { end: parseInt(dStr, 10), nums: arr, hits5 };
+      }
+    }
+
+    if (bestSeriesEntry) {
+      detectedSeriesName = `Series-${bestSeriesEntry.end} [${bestSeriesEntry.nums.join('-')}] (${bestSeriesEntry.hits5}/5)`;
+      bestSeriesEntry.nums.forEach(n => { if (!seedPool.includes(n)) seedPool.push(n); });
+    }
+
+    // Check 2nd-col odd series or 6-9 series
+    const col2OddHits5 = recent5.filter(x => COL2_ALL.has(x) && x % 2 === 1).length;
+    const s69Hits5 = recent5.filter(x => SIX_NINE_FAMILY.includes(x)).length;
+    if (col2OddHits5 >= 2) {
+      detectedSeriesName = `2nd-Col Odd [11,17,29,35] (${col2OddHits5}/5)`;
+      [11, 17, 29, 35, 5, 23].forEach(n => { if (!seedPool.includes(n)) seedPool.push(n); });
+    } else if (s69Hits5 >= 2) {
+      detectedSeriesName = `6–9 Series [6,9,16,19,26,29,36] (${s69Hits5}/5)`;
+      SIX_NINE_FAMILY.forEach(n => { if (!seedPool.includes(n)) seedPool.push(n); });
+    }
+
+    // Check active algorithm: Arithmetic A+B / |A-B|, Step-Lock, Mirror/Repeater, or Zig-Zag
+    if (arithPairSummary.size > 0) {
+      const firstArith = Array.from(arithPairSummary.values())[0];
+      detectedAlgoName = `Add/Sub (${firstArith.a}${firstArith.op === '+' ? '+' : '-'}${firstArith.b}=${firstArith.result})`;
+      Array.from(arithPairSummary.values()).slice(0, 3).forEach(h => {
+        if (!seedPool.includes(h.result)) seedPool.push(h.result);
+      });
+    } else if (second !== undefined && latest !== second) {
+      const sSum = second + latest;
+      const sDiff = Math.abs(second - latest);
+      detectedAlgoName = `Live Add/Sub (${second}±${latest})`;
+      if (sSum <= 36 && !seedPool.includes(sSum)) seedPool.push(sSum);
+      if (sDiff <= 36 && !seedPool.includes(sDiff)) seedPool.push(sDiff);
+    }
+
+    if (swapNum !== null && !seedPool.includes(swapNum)) {
+      seedPool.unshift(swapNum);
+      if (detectedAlgoName === 'Multi-Signal Blend') detectedAlgoName = `Digit Mirror (${latest}↔${swapNum})`;
+    }
+
+    if (second !== undefined && !seedPool.includes(second)) seedPool.push(second);
+    if (!seedPool.includes(latest)) seedPool.push(latest);
+
+    // Expand pool to 8 numbers using wheel neighbors around latest
+    for (const nb of detailedNeighbors) {
+      if (seedPool.length >= 8) break;
+      if (!seedPool.includes(nb.num)) seedPool.push(nb.num);
+    }
+    for (let n = 0; n <= 36 && seedPool.length < 8; n++) {
+      if (!seedPool.includes(n)) seedPool.push(n);
+    }
+
+    const liveFocusNums = seedPool.slice(0, Math.min(8, Math.max(7, targetCount)));
+    liveFocusNums.forEach((fNum, i) => {
+      const boost = Math.max(6, 15 - i);
+      scores[fNum] += boost;
+      reasons[fNum].push(`<span class="src-sys">[M11: Live Auto-Call]</span> Active ${detectedSeriesName} + ${detectedAlgoName}`);
+    });
+
+    const liveAutoCall = {
+      numbers: liveFocusNums,
+      seriesName: detectedSeriesName,
+      algoName: detectedAlgoName,
+      rbCall,
+      rbReason,
+      oeCall,
+      oeReason
+    };
+
     // Build top `targetCount` candidates (>= 7 numbers)
     const ranked = Object.keys(scores)
       .map(k => ({ num: parseInt(k, 10), score: scores[k], reasons: reasons[k] }))
@@ -1036,7 +1375,8 @@
       }
     }
 
-    return { candidates: enriched, alerts, activeRuleIds, methodSummary, zzSeriesList };
+    const combinedSeriesHints = [...zzSeriesList, ...activeSeriesHints];
+    return { candidates: enriched, alerts, activeRuleIds, methodSummary, zzSeriesList: combinedSeriesHints, liveAutoCall };
   }
 
   function renderCustomRulesList(activeRuleIds) {
@@ -1104,7 +1444,7 @@
 
     if (activeSpins.length === 0) {
       if (methodBarEl) methodBarEl.innerHTML = '';
-      quickHintsBar.innerHTML = '';
+      quickHintsBar.innerHTML = `<div class='empty-state' style='padding:12px;margin-bottom:8px;'>Spin punch karte hi current series, algorithm, Odd/Even, Red/Black aur 7–8 numbers auto-read ho jayenge.</div>`;
       alertsEl.innerHTML = '';
       hintsEl.innerHTML = `<div class="empty-state">Abhi koi number feed nahi hai.<br/>Numbers punch karein — ${hintCount} hinted numbers aur unki probability % yahan aayegi.</div>`;
       renderCustomRulesList(new Set());
@@ -1118,7 +1458,28 @@
         }</div>`;
       }
 
+      const autoBoxHtml = liveAutoCall ? `
+        <div class="alert-box" style="background:rgba(45,212,191,0.09);border-color:rgba(45,212,191,0.45);margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            <strong>⚡ Current Auto-Read Call (${liveAutoCall.numbers.length} Numbers)</strong>
+            <span style="display:flex;gap:6px;flex-wrap:wrap;">
+              <span class="hint-prob-tag">Odd/Even: ${liveAutoCall.oeCall}</span>
+              <span class="hint-prob-tag">Color: ${liveAutoCall.rbCall}</span>
+            </span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
+            ${liveAutoCall.numbers.map(n => `<span class="num-pill ${getColorClass(n)}">${n}</span>`).join('')}
+          </div>
+          <div style="font-size:0.76rem;color:#d1d5db;line-height:1.4;">
+            <strong>Series:</strong> ${liveAutoCall.seriesName} &nbsp;•&nbsp;
+            <strong>Algo:</strong> ${liveAutoCall.algoName}<br/>
+            <span style="color:var(--muted);"><strong>O/E Note:</strong> ${liveAutoCall.oeReason} &nbsp;•&nbsp; <strong>R/B Note:</strong> ${liveAutoCall.rbReason}</span>
+          </div>
+        </div>
+      ` : '';
+
       quickHintsBar.innerHTML = `
+        ${autoBoxHtml}
         <div class="quick-hints-bar">
           <span class="quick-hints-title">${candidates.length} Hints (${covPct}%):</span>
           ${candidates.map(c => `
