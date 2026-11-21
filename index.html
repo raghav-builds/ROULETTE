@@ -660,6 +660,8 @@
     let hotTarget = null;
     let overdueTarget = null;
     let sectorTarget = null;
+    let zigzagTarget = null;
+    let zigzagLabel = '—';
 
     // Method 1: Direct Repeater & Lag-2 Echo (X -> X and A-B-C-A echo)
     scores[latest] += 22;
@@ -758,6 +760,79 @@
       reasons[od.n].push(`<span class="src-sys">[M6: Overdue Gap]</span> Unseen for ${od.gap} spins (avg cycle ~37)`);
     });
 
+    // Method 7 (Zig-Zag Strategy): Color Alternation, Dozen/High-Low Sawtooth & Wheel Zig-Zag
+    const zigzagCandidates = new Set();
+    const zigzagNotes = [];
+
+    if (windowSpins.length >= 2) {
+      const c0 = getColor(latest);
+      const c1 = getColor(second);
+      const c2 = third !== undefined ? getColor(third) : null;
+
+      // Color Zig-Zag: alternating RED/BLACK pattern (e.g. R-B-R -> expect B, or R-B -> expect R)
+      if (c0 !== 'GREEN' && c1 !== 'GREEN' && c0 !== c1) {
+        const isAlternating3 = (c2 !== null && c2 !== 'GREEN' && c2 === c0);
+        const expectedNextColor = c0 === 'RED' ? 'BLACK' : 'RED';
+        const ptsColor = isAlternating3 ? 19 : 13;
+        const tagText = isAlternating3
+          ? `3-step Color Zig-Zag (${c2}→${c1}→${c0}) → expect ${expectedNextColor}`
+          : `Color Zig-Zag (${c1}→${c0}) → expect ${expectedNextColor}`;
+        zigzagLabel = `${expectedNextColor} Zig-Zag`;
+        alerts.push(`<div class="alert-box">⚡ <strong>Zig-Zag Color Strategy:</strong> ${tagText} active.</div>`);
+
+        for (let n = 1; n <= 36; n++) {
+          if (getColor(n) === expectedNextColor) {
+            const boost = (freq[n] || 0) > 0 ? ptsColor + 3 : ptsColor;
+            scores[n] += boost;
+            reasons[n].push(`<span class="src-sys">[M7: Zig-Zag Color]</span> ${tagText}`);
+            zigzagCandidates.add(n);
+            if (zigzagTarget === null) zigzagTarget = n;
+          }
+        }
+        zigzagNotes.push(tagText);
+      }
+
+      // Dozen Zig-Zag (e.g. D1 -> D2 -> D1 -> expect D2)
+      const getDozen = (x) => (x >= 1 && x <= 12) ? 1 : ((x >= 13 && x <= 24) ? 2 : ((x >= 25 && x <= 36) ? 3 : 0));
+      const d0 = getDozen(latest);
+      const d1 = getDozen(second);
+      const d2 = third !== undefined ? getDozen(third) : 0;
+      if (d0 > 0 && d1 > 0 && d0 !== d1) {
+        const expectedDozen = (d2 > 0 && d2 === d0) ? d1 : (d0 === 1 ? 2 : (d0 === 2 ? 3 : 1));
+        const dStart = (expectedDozen - 1) * 12 + 1;
+        const dEnd = expectedDozen * 12;
+        const dTag = `Dozen Zig-Zag (D${d1}→D${d0}) → D${expectedDozen} (${dStart}–${dEnd})`;
+        if (zigzagLabel === '—') zigzagLabel = `D${expectedDozen} Zig-Zag`;
+        for (let n = dStart; n <= dEnd; n++) {
+          scores[n] += 7;
+          reasons[n].push(`<span class="src-sys">[M7: Zig-Zag Dozen]</span> ${dTag}`);
+          zigzagCandidates.add(n);
+          if (zigzagTarget === null) zigzagTarget = n;
+        }
+        zigzagNotes.push(dTag);
+      }
+
+      // Wheel Zig-Zag: bounce Left (-1), Right (+1), Left (-2), Right (+2) around `latest` on WHEEL_ORDER
+      const wIdx = WHEEL_ORDER.indexOf(latest);
+      if (wIdx !== -1) {
+        const lenW = WHEEL_ORDER.length;
+        const zzSteps = [
+          { offset: -1, w: 14, lbl: 'L1' },
+          { offset: +1, w: 13, lbl: 'R1' },
+          { offset: -2, w: 10, lbl: 'L2' },
+          { offset: +2, w: 9,  lbl: 'R2' }
+        ];
+        zzSteps.forEach(st => {
+          const targetNum = WHEEL_ORDER[(wIdx + st.offset + lenW) % lenW];
+          scores[targetNum] += st.w;
+          reasons[targetNum].push(`<span class="src-whl">[M7: Wheel Zig-Zag ${st.lbl}]</span> Sawtooth step ${st.offset > 0 ? '+' + st.offset : st.offset} from #${latest}`);
+          zigzagCandidates.add(targetNum);
+          if (zigzagTarget === null) zigzagTarget = targetNum;
+        });
+        zigzagNotes.push(`Wheel Sawtooth around #${latest} (L1/R1/L2/R2)`);
+      }
+    }
+
     // Dozen & Column Reversion Alerts
     if (windowSpins.length >= 6) {
       const recent6 = windowSpins.slice(0, 6);
@@ -769,7 +844,7 @@
       if (d3 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>Dozen Shift:</strong> Last 6 spins mein 3rd Dozen (25–36) ${d3} baar aaya hai.</div>`);
     }
 
-    // Method 7: User Custom Rules
+    // Method 8: User Custom Rules
     evaluateCustomRules(windowSpins, scores, reasons, alerts, activeRuleIds);
 
     // Build top `targetCount` candidates (>= 7 numbers)
@@ -834,7 +909,8 @@
       { name: 'M3 Markov Follow', pick: transitionTarget !== null ? `${transitionTarget} (${transitionSamples}x)` : '—' },
       { name: 'M4 Wheel & Sector', pick: `${wheelPrimaryTarget !== null ? wheelPrimaryTarget : '—'} (${latestSector})` },
       { name: 'M5 Hot Momentum', pick: hotTarget !== null ? `${hotTarget} (${freq[hotTarget] || 0}x)` : '—' },
-      { name: 'M6 Overdue Sleep', pick: overdueTarget !== null ? `${overdueTarget} (${lastSeenIdx[overdueTarget] === -1 ? windowSpins.length : lastSeenIdx[overdueTarget]}g)` : '—' }
+      { name: 'M6 Overdue Sleep', pick: overdueTarget !== null ? `${overdueTarget} (${lastSeenIdx[overdueTarget] === -1 ? windowSpins.length : lastSeenIdx[overdueTarget]}g)` : '—' },
+      { name: 'M7 Zig-Zag Strategy', pick: zigzagTarget !== null ? `${zigzagTarget} (${zigzagLabel})` : '—' }
     ];
 
     return { candidates: enriched, alerts, activeRuleIds, methodSummary };
