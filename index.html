@@ -671,11 +671,77 @@
       reasons[third].push(`<span class="src-sys">[M1: Echo Lag-2]</span> 2-step echo around ${latest} (${third}..${latest}..${third})`);
     }
 
-    // Method 2: Sandwich / Mirror Pattern (A - B - A)
+    // Method 2: Multi-Gap Mirror Sandwich Watch (1-gap A-B-A & 3-gap A-X-Y-Z-A) + Step-Lock (+2/+2, +3/+3, -2/-2, -3/-3)
     if (second !== undefined) {
+      // 1-number gap mirror: windowSpins[1] -> windowSpins[0] -> [windowSpins[1]]
       scores[second] += 25;
-      reasons[second].push(`<span class="src-sys">[M2: Sandwich]</span> Mirror setup (${second} - ${latest} - ${second})`);
-      alerts.push(`<div class="alert-box">🔄 <strong>Mirror Sandwich Watch:</strong> Latest <b>${latest}</b> ke pehle <b>${second}</b> tha — agar <b>${second}</b> aata hai toh <code>${second}-${latest}-${second}</code> sandwich banega.</div>`);
+      reasons[second].push(`<span class="src-sys">[M2: 1-Gap Sandwich]</span> Mirror setup (${second} - ${latest} - ${second})`);
+      alerts.push(`<div class="alert-box">🔄 <strong>Mirror Sandwich Watch (1-Gap):</strong> Latest <b>${latest}</b> ke pehle <b>${second}</b> tha — agar <b>${second}</b> aata hai toh <code>${second}-${latest}-${second}</code> sandwich banega.</div>`);
+      if (sandwichTarget === null) sandwichTarget = second;
+    }
+
+    // 3-number gap mirror: windowSpins[3] is 3 spins before windowSpins[0] (pattern A - [x1, x2, x3] - A)
+    if (windowSpins.length >= 4) {
+      const gap3Anchor = windowSpins[3];
+      const midGap3 = windowSpins.slice(0, 3).slice().reverse();
+      scores[gap3Anchor] += 22;
+      reasons[gap3Anchor].push(`<span class="src-sys">[M2: 3-Gap Sandwich]</span> 3-number gap mirror (${gap3Anchor} - [${midGap3.join(',')}] - ${gap3Anchor})`);
+      alerts.push(`<div class="alert-box">🪞 <strong>Mirror Sandwich Watch (3-Gap):</strong> 3 numbers (<code>${midGap3.join(' → ')}</code>) ke gap ke baad anchor <b>${gap3Anchor}</b> ka mirror return watch (<code>${gap3Anchor}..${gap3Anchor}</code>).</div>`);
+      if (sandwichTarget === null) sandwichTarget = gap3Anchor;
+    }
+
+    // Step-Lock Pattern Detection: +2/+2, +3/+3, -2/-2, -3/-3 (both numeric value & wheel-slot step)
+    if (windowSpins.length >= 3) {
+      const s0 = windowSpins[0];
+      const s1 = windowSpins[1];
+      const s2 = windowSpins[2];
+      const diff1 = s1 - s2;
+      const diff2 = s0 - s1;
+      const stepTargets = [2, 3, -2, -3];
+
+      // Numeric step lock (+2/+2, +3/+3, -2/-2, -3/-3)
+      if (stepTargets.includes(diff1) && diff1 === diff2) {
+        const nextNumStep = s0 + diff2;
+        if (nextNumStep >= 0 && nextNumStep <= 36) {
+          const signStr = diff2 > 0 ? `+${diff2}` : `${diff2}`;
+          scores[nextNumStep] += 27;
+          reasons[nextNumStep].push(`<span class="src-sys">[M2: Step Lock ${signStr}/${signStr}]</span> Pattern ${s2}→${s1}→${s0} (${signStr}, ${signStr}) → next ${nextNumStep}`);
+          alerts.push(`<div class="alert-box">📐 <strong>Step Pattern Lock (${signStr} / ${signStr}):</strong> Sequence <code>${s2} → ${s1} → ${s0}</code> mein lagatar <b>${signStr}</b> step chal raha hai — next target <b>${nextNumStep}</b>.</div>`);
+          sandwichTarget = nextNumStep;
+        }
+      } else if (stepTargets.includes(diff2)) {
+        // Emerging 1-step momentum (+2, +3, -2, -3)
+        const nextNumStep = s0 + diff2;
+        if (nextNumStep >= 0 && nextNumStep <= 36) {
+          const signStr = diff2 > 0 ? `+${diff2}` : `${diff2}`;
+          scores[nextNumStep] += 12;
+          reasons[nextNumStep].push(`<span class="src-sys">[M2: Step ${signStr}]</span> Latest shift ${s1}→${s0} (${signStr}) → next ${nextNumStep}`);
+        }
+      }
+
+      // Wheel-slot step lock (+2/+2, +3/+3, -2/-2, -3/-3 on WHEEL_ORDER)
+      const w2 = WHEEL_ORDER.indexOf(s2);
+      const w1 = WHEEL_ORDER.indexOf(s1);
+      const w0 = WHEEL_ORDER.indexOf(s0);
+      if (w2 !== -1 && w1 !== -1 && w0 !== -1) {
+        const lenW = WHEEL_ORDER.length;
+        const toSignedSlotStep = (fromIdx, toIdx) => {
+          let d = (toIdx - fromIdx + lenW) % lenW;
+          if (d > lenW / 2) d -= lenW;
+          return d;
+        };
+        const wStep1 = toSignedSlotStep(w2, w1);
+        const wStep2 = toSignedSlotStep(w1, w0);
+        if (stepTargets.includes(wStep1) && wStep1 === wStep2) {
+          const nextWIdx = (w0 + wStep2 + lenW) % lenW;
+          const nextWheelNum = WHEEL_ORDER[nextWIdx];
+          const signStr = wStep2 > 0 ? `+${wStep2}` : `${wStep2}`;
+          scores[nextWheelNum] += 26;
+          reasons[nextWheelNum].push(`<span class="src-whl">[M2: Wheel Step ${signStr}/${signStr}]</span> Wheel slots ${s2}→${s1}→${s0} (${signStr}, ${signStr}) → #${nextWheelNum}`);
+          alerts.push(`<div class="alert-box">🎡 <strong>Wheel Step Lock (${signStr} / ${signStr}):</strong> Wheel slots par <code>${s2} → ${s1} → ${s0}</code> mein <b>${signStr}</b> step lock — next wheel target <b>#${nextWheelNum}</b>.</div>`);
+          sandwichTarget = nextWheelNum;
+        }
+      }
     }
 
     // Method 3: Markov / Historical Transition Follow-up (what came right after `latest` historically)
