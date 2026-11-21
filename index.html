@@ -913,7 +913,64 @@
       { name: 'M7 Zig-Zag Strategy', pick: zigzagTarget !== null ? `${zigzagTarget} (${zigzagLabel})` : '—' }
     ];
 
-    return { candidates: enriched, alerts, activeRuleIds, methodSummary };
+    // Build concrete Zig-Zag Series Hint (like Zero Series / Orphelins)
+    const zzSeriesList = [];
+    if (windowSpins.length >= 2) {
+      const c0 = getColor(latest);
+      const c1 = getColor(second);
+      const c2 = third !== undefined ? getColor(third) : null;
+      const wIdx = WHEEL_ORDER.indexOf(latest);
+      const lenW = WHEEL_ORDER.length;
+
+      // 1) Color Zig-Zag Series Hint
+      if (c0 !== 'GREEN' && c1 !== 'GREEN' && c0 !== c1) {
+        const expectedNextColor = c0 === 'RED' ? 'BLACK' : 'RED';
+        const is3Step = (c2 !== null && c2 !== 'GREEN' && c2 === c0);
+        const colorPool = [];
+        if (wIdx !== -1) {
+          for (let step = 1; step <= 18; step++) {
+            const rNum = WHEEL_ORDER[(wIdx + step) % lenW];
+            const lNum = WHEEL_ORDER[(wIdx - step + lenW) % lenW];
+            if (getColor(rNum) === expectedNextColor && !colorPool.includes(rNum)) colorPool.push(rNum);
+            if (getColor(lNum) === expectedNextColor && !colorPool.includes(lNum)) colorPool.push(lNum);
+            if (colorPool.length >= 8) break;
+          }
+        }
+        const seriesNums = colorPool.slice(0, 8);
+        const covPct = ((seriesNums.length / 37) * 100).toFixed(2);
+        const boostFactor = is3Step ? 1.14 : 1.08;
+        const seriesProbPct = Math.min(42, (seriesNums.length / 37) * 100 * boostFactor).toFixed(2);
+        zzSeriesList.push({
+          title: `⚡ Zig-Zag ${expectedNextColor} Series (${is3Step ? '3-Step Confirmed' : '2-Step Active'})`,
+          numbers: seriesNums,
+          probPct: seriesProbPct,
+          covPct,
+          logic: `${is3Step ? `${c2}→${c1}→${c0}` : `${c1}→${c0}`} alternation detected; wheel-ordered ${expectedNextColor} numbers near #${latest}.`
+        });
+      }
+
+      // 2) Wheel Sawtooth Zig-Zag Series Hint (L1, R1, L2, R2, L3, R3)
+      if (wIdx !== -1) {
+        const sawtoothNums = [];
+        for (let k = 1; k <= 3; k++) {
+          const leftN = WHEEL_ORDER[(wIdx - k + lenW) % lenW];
+          const rightN = WHEEL_ORDER[(wIdx + k) % lenW];
+          if (!sawtoothNums.includes(leftN)) sawtoothNums.push(leftN);
+          if (!sawtoothNums.includes(rightN)) sawtoothNums.push(rightN);
+        }
+        const stCov = ((sawtoothNums.length / 37) * 100).toFixed(2);
+        const stProb = Math.min(35, (sawtoothNums.length / 37) * 100 * 1.07).toFixed(2);
+        zzSeriesList.push({
+          title: `🔀 Wheel Sawtooth Zig-Zag Series (Around #${latest})`,
+          numbers: sawtoothNums,
+          probPct: stProb,
+          covPct: stCov,
+          logic: `Alternating left/right wheel bounce (L1, R1, L2, R2, L3, R3) centered on #${latest}.`
+        });
+      }
+    }
+
+    return { candidates: enriched, alerts, activeRuleIds, methodSummary, zzSeriesList };
   }
 
   function renderCustomRulesList(activeRuleIds) {
@@ -986,7 +1043,7 @@
       hintsEl.innerHTML = `<div class="empty-state">Abhi koi number feed nahi hai.<br/>Numbers punch karein — ${hintCount} hinted numbers aur unki probability % yahan aayegi.</div>`;
       renderCustomRulesList(new Set());
     } else {
-      const { candidates, alerts, activeRuleIds, methodSummary } = analyzePatterns(activeSpins, hintCount);
+      const { candidates, alerts, activeRuleIds, methodSummary, zzSeriesList } = analyzePatterns(activeSpins, hintCount);
       const maxProb = Math.max(...candidates.map(x => x.modelProbPct), 3.5);
 
       if (methodBarEl) {
@@ -1005,7 +1062,19 @@
           `).join('')}
         </div>
       `;
-      alertsEl.innerHTML = alerts.join('');
+      const zzSeriesHtml = (zzSeriesList || []).map(s => `
+        <div class="alert-box" style="background:rgba(45,212,191,0.07);border-color:rgba(45,212,191,0.35);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            <strong>${s.title}</strong>
+            <span class="hint-prob-tag">Series Prob: ${s.probPct}% (${s.numbers.length} nums • ${s.covPct}% table)</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;">
+            ${s.numbers.map(n => `<span class="num-pill ${getColorClass(n)}" style="min-width:30px;height:30px;font-size:0.82rem;">${n}</span>`).join('')}
+          </div>
+          <div style="font-size:0.76rem;color:var(--muted);"><strong>Series Logic:</strong> ${s.logic}</div>
+        </div>
+      `).join('');
+      alertsEl.innerHTML = zzSeriesHtml + alerts.join('');
       renderCustomRulesList(activeRuleIds);
 
       hintsEl.innerHTML = candidates.map((c, idx) => {
