@@ -1014,6 +1014,1829 @@
       });
     }
 
+    // Build top `targetCount` candidates (>= 7 numbers)
+    const ranked = Object.keys(scores)
+      .map(k => ({ num: parseInt(k, 10), score: scores[k], reasons: reasons[k] }))
+      .sort((a, b) => b.score - a.score);
+
+    const candidates = ranked.filter(x => x.reasons.length > 0).slice(0, targetCount);
+
+    for (const nb of detailedNeighbors) {
+      if (candidates.length >= targetCount) break;
+      if (!candidates.some(c => c.num === nb.num)) {
+        const fallbackScore = Math.max(4, scores[nb.num] + (10 - nb.step));
+        candidates.push({
+          num: nb.num,
+          score: fallbackScore,
+          reasons: [
+            ...reasons[nb.num],
+            `<span class="src-whl">[Wheel Neighbor Fill]</span> ${nb.label}`
+          ]
+        });
+      }
+    }
+
+    for (let n = 0; n <= 36 && candidates.length < targetCount; n++) {
+      if (!candidates.some(c => c.num === n)) {
+        candidates.push({
+          num: n,
+          score: Math.max(2, scores[n] || 2),
+          reasons: [
+            ...reasons[n],
+            `<span class="src-sys">[Baseline Balance]</span> Uniform pocket baseline (1/37)`
+          ]
+        });
+      }
+    }
+
+    const topSlice = candidates.slice(0, targetCount);
+
+    // Compute Model Probability % (blending 1/37 uniform baseline + normalized signal weight)
+    // and Empirical Hit Rate % from the active spin window
+    const sumPositiveScore = topSlice.reduce((acc, c) => acc + Math.max(1, c.score), 0);
+    const totalSetSignalShare = Math.min(0.45, targetCount * 0.032);
+    const baseSingleProb = 100 / 37; // 2.7027%
+
+    const enriched = topSlice.map(c => {
+      const weightShare = Math.max(0, c.score) / Math.max(1, sumPositiveScore);
+      const modelProbPct = ((1 - totalSetSignalShare) * baseSingleProb) + (totalSetSignalShare * weightShare * 100);
+      const empHits = freq[c.num] || 0;
+      const empProbPct = (empHits / windowSpins.length) * 100;
+      return {
+        ...c,
+        modelProbPct,
+        empProbPct,
+        empHits
+      };
+    });
+
+    const methodSummary = [
+      { name: 'M1 Repeater & Echo', pick: `${repeaterTarget}${third !== undefined ? ' / ' + third : ''}` },
+      { name: 'M2 Sandwich Mirror', pick: sandwichTarget !== null ? String(sandwichTarget) : '—' },
+      { name: 'M3 Markov Follow', pick: transitionTarget !== null ? `${transitionTarget} (${transitionSamples}x)` : '—' },
+      { name: 'M4 Wheel & Sector', pick: `${wheelPrimaryTarget !== null ? wheelPrimaryTarget : '—'} (${latestSector})` },
+      { name: 'M5 Hot Momentum', pick: hotTarget !== null ? `${hotTarget} (${freq[hotTarget] || 0}x)` : '—' },
+      { name: 'M6 Overdue Sleep', pick: overdueTarget !== null ? `${overdueTarget} (${lastSeenIdx[overdueTarget] === -1 ? windowSpins.length : lastSeenIdx[overdueTarget]}g)` : '—' },
+      { name: 'M7 Zig-Zag Strategy', pick: zigzagTarget !== null ? `${zigzagTarget} (${zigzagLabel})` : '—' }
+    ];
+
+    // Build concrete Zig-Zag Series Hint (like Zero Series / Orphelins)
+    const zzSeriesList = [];
+    if (windowSpins.length >= 2) {
+      const c0 = getColor(latest);
+      const c1 = getColor(second);
+      const c2 = third !== undefined ? getColor(third) : null;
+      const wIdx = WHEEL_ORDER.indexOf(latest);
+      const lenW = WHEEL_ORDER.length;
+
+      // 1) Color Zig-Zag Series Hint
+      if (c0 !== 'GREEN' && c1 !== 'GREEN' && c0 !== c1) {
+        const expectedNextColor = c0 === 'RED' ? 'BLACK' : 'RED';
+        const is3Step = (c2 !== null && c2 !== 'GREEN' && c2 === c0);
+        const colorPool = [];
+        if (wIdx !== -1) {
+          for (let step = 1; step <= 18; step++) {
+            const rNum = WHEEL_ORDER[(wIdx + step) % lenW];
+            const lNum = WHEEL_ORDER[(wIdx - step + lenW) % lenW];
+            if (getColor(rNum) === expectedNextColor && !colorPool.includes(rNum)) colorPool.push(rNum);
+            if (getColor(lNum) === expectedNextColor && !colorPool.includes(lNum)) colorPool.push(lNum);
+            if (colorPool.length >= 8) break;
+          }
+        }
+        const seriesNums = colorPool.slice(0, 8);
+        const covPct = ((seriesNums.length / 37) * 100).toFixed(2);
+        const boostFactor = is3Step ? 1.14 : 1.08;
+        const seriesProbPct = Math.min(42, (seriesNums.length / 37) * 100 * boostFactor).toFixed(2);
+        zzSeriesList.push({
+          title: `⚡ Zig-Zag ${expectedNextColor} Series (${is3Step ? '3-Step Confirmed' : '2-Step Active'})`,
+          numbers: seriesNums,
+          probPct: seriesProbPct,
+          covPct,
+          logic: `${is3Step ? `${c2}→${c1}→${c0}` : `${c1}→${c0}`} alternation detected; wheel-ordered ${expectedNextColor} numbers near #${latest}.`
+        });
+      }
+
+      // 2) Wheel Sawtooth Zig-Zag Series Hint (L1, R1, L2, R2, L3, R3)
+      if (wIdx !== -1) {
+        const sawtoothNums = [];
+        for (let k = 1; k <= 3; k++) {
+          const leftN = WHEEL_ORDER[(wIdx - k + lenW) % lenW];
+          const rightN = WHEEL_ORDER[(wIdx + k) % lenW];
+          if (!sawtoothNums.includes(leftN)) sawtoothNums.push(leftN);
+          if (!sawtoothNums.includes(rightN)) sawtoothNums.push(rightN);
+        }
+        const stCov = ((sawtoothNums.length / 37) * 100).toFixed(2);
+        const stProb = Math.min(35, (sawtoothNums.length / 37) * 100 * 1.07).toFixed(2);
+        zzSeriesList.push({
+          title: `🔀 Wheel Sawtooth Zig-Zag Series (Around #${latest})`,
+          numbers: sawtoothNums,
+          probPct: stProb,
+          covPct: stCov,
+          logic: `Alternating left/right wheel bounce (L1, R1, L2, R2, L3, R3) centered on #${latest}.`
+        });
+      }
+    }
+
+    const combinedSeriesHints = [...zzSeriesList, ...activeSeriesHints];
+    return { candidates: enriched, alerts, activeRuleIds, methodSummary, zzSeriesList: combinedSeriesHints };
+  }
+
+  function renderCustomRulesList(activeRuleIds) {
+    const el = document.getElementById('customRulesList');
+    document.getElementById('ruleCountBadge').textContent = `${customRules.length} Custom Rules`;
+
+    if (customRules.length === 0) {
+      el.innerHTML = `<div style="font-size:0.8rem; color:var(--muted); padding:8px;">Abhi koi custom rule nahi hai. "+ Add Custom Pattern/Rule" par click karke apna rule add karein.</div>`;
+      return;
+    }
+
+    el.innerHTML = customRules.map(r => {
+      const isActive = activeRuleIds.has(r.id);
+      const condSummary = r.type === 'AFTER_NUM' ? `Latest in [${r.triggerNums.join(',')}]`
+        : r.type === 'REPEAT_X' ? `Repeater (${r.triggerNums.length ? r.triggerNums.join(',') : 'Any'})`
+        : r.type === 'SANDWICH_ABA' ? `Mirror/Sandwich`
+        : r.type === 'COLOR_STREAK' ? `${r.streakConfig.count}x ${r.streakConfig.color}`
+        : `Dozen ${r.dozen}`;
+
+      return `
+        <div class="rule-chip ${isActive ? 'active-rule' : ''}">
+          <div class="rule-chip-text">
+            <strong>${r.name || r.type}</strong> ${isActive ? '<span style="color:var(--purple);">• TRIGGERED</span>' : ''}<br/>
+            <span style="color:var(--muted);">If: ${condSummary} → Hint: [${r.targets.join(', ')}] (Wt: ${r.weight})</span>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button style="padding:4px 7px; font-size:0.72rem;" onclick="toggleRule('${r.id}')">${r.enabled ? 'ON' : 'OFF'}</button>
+            <button class="danger" style="padding:4px 7px; font-size:0.72rem;" onclick="deleteRule('${r.id}')">✕</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderAll() {
+    const winSize = parseInt(document.getElementById('windowSlider').value, 10);
+    document.getElementById('sliderVal').textContent = winSize;
+    document.getElementById('totalCountBadge').textContent = `${spins.length} Spins`;
+    document.getElementById('windowLabel').textContent = `LAST ${Math.min(winSize, spins.length)} ROUNDS`;
+
+    const activeSpins = spins.slice(0, winSize);
+
+    const strip = document.getElementById('latestStrip');
+    if (activeSpins.length === 0) {
+      strip.innerHTML = `<span class="strip-label">Empty — Keypad se number punch karein ya "Paste Numbers" use karein</span>`;
+    } else {
+      strip.innerHTML = `<span class="strip-label">Latest →</span>` +
+        activeSpins.slice(0, 16).map((n, idx) =>
+          `<span class="num-pill ${getColorClass(n)} ${idx === 0 ? 'latest' : ''}">${n}</span>`
+        ).join('');
+    }
+
+    const hintCountEl = document.getElementById('hintCountSelect');
+    const hintCount = hintCountEl ? parseInt(hintCountEl.value, 10) || 8 : 8;
+    const covPct = ((hintCount / 37) * 100).toFixed(2);
+    const titleEl = document.getElementById('hintsCardTitle');
+    const covBadgeEl = document.getElementById('coverageBadge');
+    if (titleEl) titleEl.textContent = `🎯 Top ${hintCount} Multi-Method Hints & Probabilities`;
+    if (covBadgeEl) covBadgeEl.textContent = `Base: 2.70% | ${hintCount}-Num Coverage: ${covPct}%`;
+
+    const methodBarEl = document.getElementById('methodSummaryBar');
+    const quickHintsBar = document.getElementById('quickHintsBar');
+    const alertsEl = document.getElementById('patternAlerts');
+    const hintsEl = document.getElementById('hintsContainer');
+
+    if (activeSpins.length === 0) {
+      if (methodBarEl) methodBarEl.innerHTML = '';
+      quickHintsBar.innerHTML = '';
+      alertsEl.innerHTML = '';
+      hintsEl.innerHTML = `<div class="empty-state">Abhi koi number feed nahi hai.<br/>Numbers punch karein — ${hintCount} hinted numbers aur unki probability % yahan aayegi.</div>`;
+      renderCustomRulesList(new Set());
+    } else {
+      const { candidates, alerts, activeRuleIds, methodSummary, zzSeriesList } = analyzePatterns(activeSpins, hintCount);
+      const maxProb = Math.max(...candidates.map(x => x.modelProbPct), 3.5);
+
+      if (methodBarEl) {
+        methodBarEl.innerHTML = `<div class="method-strip">${
+          methodSummary.map(m => `<div class="method-pill"><strong>${m.name}</strong><span>Pick: ${m.pick}</span></div>`).join('')
+        }</div>`;
+      }
+
+      quickHintsBar.innerHTML = `
+        <div class="quick-hints-bar">
+          <span class="quick-hints-title">${candidates.length} Hints (${covPct}%):</span>
+          ${candidates.map(c => `
+            <span class="num-pill ${getColorClass(c.num)}" style="position:relative;padding:0 8px;gap:4px;">
+              ${c.num}<span style="font-size:0.65rem;opacity:0.9;">${c.modelProbPct.toFixed(1)}%</span>
+            </span>
+          `).join('')}
+        </div>
+      `;
+      const zzSeriesHtml = (zzSeriesList || []).map(s => `
+        <div class="alert-box" style="background:rgba(45,212,191,0.07);border-color:rgba(45,212,191,0.35);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+            <strong>${s.title}</strong>
+            <span class="hint-prob-tag">Series Prob: ${s.probPct}% (${s.numbers.length} nums • ${s.covPct}% table)</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;">
+            ${s.numbers.map(n => `<span class="num-pill ${getColorClass(n)}" style="min-width:30px;height:30px;font-size:0.82rem;">${n}</span>`).join('')}
+          </div>
+          <div style="font-size:0.76rem;color:var(--muted);"><strong>Series Logic:</strong> ${s.logic}</div>
+        </div>
+      `).join('');
+      alertsEl.innerHTML = zzSeriesHtml + alerts.join('');
+      renderCustomRulesList(activeRuleIds);
+
+      hintsEl.innerHTML = candidates.map((c, idx) => {
+        const barWidth = Math.max(12, Math.min(100, Math.round((c.modelProbPct / maxProb) * 100)));
+        return `
+          <div class="hint-item">
+            <span class="num-pill ${getColorClass(c.num)}">${c.num}</span>
+            <div class="hint-info">
+              <div class="hint-header">
+                <span class="hint-tag">Hint #${idx + 1} • ${getColor(c.num)}</span>
+                <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <span class="hint-prob-tag">Model Prob: ${c.modelProbPct.toFixed(2)}%</span>
+                  <span class="hint-score">Emp: ${c.empProbPct.toFixed(1)}% (${c.empHits}x) | Score: ${c.score}</span>
+                </span>
+              </div>
+              <div class="hint-reason"><strong>Logic:</strong> ${c.reasons.join(' • ')}</div>
+              <div class="prob-bar-wrap"><div class="prob-bar-fill" style="width:${barWidth}%"></div></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    const matrix = document.getElementById('matrixGrid');
+    if (activeSpins.length === 0) {
+      matrix.innerHTML = `<div style="grid-column: 1 / -1; text-align:center; padding:16px; color:var(--muted); font-size:0.8rem;">0 numbers in history</div>`;
+    } else {
+      matrix.innerHTML = activeSpins.slice(0, 180).map((n, idx) =>
+        `<div class="matrix-cell ${getColorClass(n)} ${idx === 0 ? 'first' : ''}">${n}</div>`
+      ).join('');
+    }
+
+    const reds = activeSpins.filter(n => RED_NUMS.has(n)).length;
+    const blacks = activeSpins.filter(n => n !== 0 && !RED_NUMS.has(n)).length;
+    const zeros = activeSpins.filter(n => n === 0).length;
+    const total = activeSpins.length;
+
+    document.getElementById('outsideStats').innerHTML = `
+      <div class="stat-box"><div class="val" style="color:#f87171">${total ? ((reds/total)*100).toFixed(1) : '0.0'}%</div><div class="lbl">RED (${reds})</div></div>
+      <div class="stat-box"><div class="val">${total ? ((blacks/total)*100).toFixed(1) : '0.0'}%</div><div class="lbl">BLACK (${blacks})</div></div>
+      <div class="stat-box"><div class="val" style="color:#4ade80">${total ? ((zeros/total)*100).toFixed(1) : '0.0'}%</div><div class="lbl">ZERO (${zeros})</div></div>
+    `;
+  }
+
+  function buildKeypad() {
+    const pad = document.getElementById('keypad');
+    let html = '';
+    for (let i = 0; i <= 36; i++) {
+      html += `<button class="key-btn ${getColorClass(i)}" onclick="punchNumber(${i})">${i}</button>`;
+    }
+    pad.innerHTML = html;
+  }
+
+  function openBulkModal() { document.getElementById('bulkModal').classList.add('open'); }
+  function closeBulkModal() { document.getElementById('bulkModal').classList.remove('open'); }
+
+  function applyBulkImport() {
+    const raw = document.getElementById('bulkText').value;
+    const parsed = raw.split(/[\s,;|\n]+/)
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => !isNaN(n) && n >= 0 && n <= 36);
+    if (parsed.length > 0) {
+      spins = parsed.slice(0, 500);
+      saveSpins();
+      renderAll();
+      closeBulkModal();
+    }
+  }
+
+  function openRuleModal() {
+    toggleRuleConditionInputs();
+    document.getElementById('ruleModal').classList.add('open');
+  }
+  function closeRuleModal() { document.getElementById('ruleModal').classList.remove('open'); }
+
+  function toggleRuleConditionInputs() {
+    const type = document.getElementById('ruleType').value;
+    document.getElementById('condNumbersGroup').style.display = (type === 'AFTER_NUM' || type === 'REPEAT_X') ? 'block' : 'none';
+    document.getElementById('condStreakGroup').style.display = (type === 'COLOR_STREAK') ? 'block' : 'none';
+    document.getElementById('condDozenGroup').style.display = (type === 'DOZEN_HIT') ? 'block' : 'none';
+  }
+
+  function parseNumList(str) {
+    return str.split(/[\s,;|\n]+/)
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => !isNaN(n) && n >= 0 && n <= 36);
+  }
+
+  function saveCustomRule() {
+    const type = document.getElementById('ruleType').value;
+    const name = document.getElementById('ruleName').value.trim();
+    const targets = parseNumList(document.getElementById('targetNumbers').value);
+    const weight = Math.max(10, Math.min(50, parseInt(document.getElementById('ruleWeight').value, 10) || 28));
+
+    if (targets.length === 0) return;
+
+    const triggerNums = parseNumList(document.getElementById('condNumbers').value);
+    const streakRaw = document.getElementById('condStreak').value.trim().toUpperCase();
+    const parts = streakRaw.split(':');
+    const streakConfig = {
+      color: (parts[0] === 'BLACK' ? 'BLACK' : 'RED'),
+      count: Math.max(2, parseInt(parts[1], 10) || 3)
+    };
+    const dozen = parseInt(document.getElementById('condDozen').value, 10) || 1;
+
+    customRules.unshift({
+      id: 'rule_' + Date.now(),
+      name,
+      type,
+      triggerNums,
+      streakConfig,
+      dozen,
+      targets,
+      weight,
+      enabled: true
+    });
+
+    saveRules();
+    document.getElementById('ruleName').value = '';
+    document.getElementById('condNumbers').value = '';
+    document.getElementById('targetNumbers').value = '';
+    closeRuleModal();
+    renderAll();
+  }
+
+  function toggleRule(id) {
+    const r = customRules.find(x => x.id === id);
+    if (r) { r.enabled = !r.enabled; saveRules(); renderAll(); }
+  }
+
+  function deleteRule(id) {
+    customRules = customRules.filter(x => x.id !== id);
+    saveRules();
+    renderAll();
+  }
+
+
+
+/* ===================== FAST SCREENSHOT -> PLAIN TEXT & NUMBER EXTRACTOR ===================== */
+let ocrResults = [];
+let ocrBusy = false;
+let ocrWorker = null;
+let currentOcrImage = null;
+
+function openOcrModal(){
+  document.getElementById('ocrModal').classList.add('open');
+}
+function closeOcrModal(){
+  document.getElementById('ocrModal').classList.remove('open');
+}
+
+// Support pasting screenshot directly with Ctrl+V anywhere while modal is open
+document.addEventListener('paste', (e) => {
+  if (!document.getElementById('ocrModal').classList.contains('open')) return;
+  const items = (e.clipboardData || e.originalEvent.clipboardData)?.items || [];
+  for (const item of items) {
+    if (item.type.indexOf('image') !== -1) {
+      const blob = item.getAsFile();
+      if (blob) {
+        loadBlobIntoOcr(blob);
+        e.preventDefault();
+        break;
+      }
+    }
+  }
+});
+
+function handleOcrFileSelect(){
+  const f = document.getElementById('ocrFile').files[0];
+  if (f) loadBlobIntoOcr(f);
+}
+
+function loadBlobIntoOcr(fileOrBlob){
+  const img = document.getElementById('ocrPreview');
+  const hint = document.getElementById('ocrNoImgHint');
+  const url = URL.createObjectURL(fileOrBlob);
+  img.onload = () => {
+    img.style.display = 'block';
+    if (hint) hint.style.display = 'none';
+    currentOcrImage = img;
+    // Automatically start converting screenshot to plain text immediately!
+    readNumbersFromScreenshot();
+  };
+  img.src = url;
+}
+
+function setOcrProgress(p, msg){
+  const box = document.getElementById('ocrProgress');
+  const bar = document.getElementById('ocrProgressBar');
+  box.style.display = 'block';
+  bar.style.width = Math.max(0, Math.min(100, p)) + '%';
+  if (msg) document.getElementById('ocrStatus').textContent = msg;
+}
+
+async function ensureTesseractWorker(){
+  if (!window.Tesseract) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      s.onload = () => resolve(true);
+      s.onerror = () => reject(new Error('OCR library load nahi hui. Internet check karein.'));
+      document.head.appendChild(s);
+    });
+  }
+  if (!ocrWorker) {
+    ocrWorker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+          setOcrProgress(20 + m.progress * 70, `Converting screenshot to plain text... ${Math.round(m.progress * 100)}%`);
+        }
+      }
+    });
+    await ocrWorker.setParameters({
+      tessedit_char_whitelist: '0123456789OISZGB ',
+      tessedit_pageseg_mode: '6',
+      preserve_interword_spaces: '1',
+      user_defined_dpi: '300'
+    });
+  }
+  return ocrWorker;
+}
+
+function canvasFromImage(img, scale = 1){
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+  c.height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  return c;
+}
+
+function preprocessCanvas(source, mode){
+  const c = document.createElement('canvas');
+  c.width = source.width;
+  c.height = source.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(source, 0, 0);
+  const im = ctx.getImageData(0, 0, c.width, c.height);
+  const d = im.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const isReddish = (r > 85 && r > g * 1.2 && r > b * 1.12);
+    const redBoost = isReddish ? Math.min(255, Math.round(r * 1.45)) : r;
+    let v;
+    if (mode === 'max') {
+      v = Math.max(redBoost, g, b);
+    } else if (mode === 'contrast') {
+      const m = Math.max(redBoost, g, b);
+      v = m < 70 ? 0 : m > 165 ? 255 : Math.round((m - 70) * 255 / 95);
+    } else if (mode === 'binarize') {
+      const m = Math.max(redBoost, g, b);
+      v = m >= 120 ? 255 : 0;
+    } else {
+      v = Math.round(0.38 * redBoost + 0.48 * g + 0.14 * b);
+    }
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  ctx.putImageData(im, 0, 0);
+  return c;
+}
+
+// Strict digit-only token normalizer: avoids misreading 'L' or '1' in wrong contexts
+function normalizeToken(raw){
+  let s = String(raw || '').toUpperCase().replace(/[^0-9OISZGB]/g, '');
+  if (!s) return null;
+  s = s.replace(/O/g, '0').replace(/I/g, '1').replace(/S/g, '5').replace(/Z/g, '2').replace(/G/g, '6').replace(/B/g, '8');
+  if (!/^\d{1,2}$/.test(s)) return null;
+  const n = parseInt(s, 10);
+  return (n >= 0 && n <= 36) ? n : null;
+}
+
+// Also splits glued 2-3 digit strings if OCR merged adjacent single digits like "012" -> [0, 12] or "728"
+function extractNumbersFromPlainText(plainText){
+  const tokens = String(plainText || '').split(/[\s,;|/\-\n\r\t]+/);
+  const nums = [];
+  for (const t of tokens) {
+    const cleaned = String(t || '').toUpperCase().replace(/[^0-9OISZGB]/g, '')
+      .replace(/O/g, '0').replace(/I/g, '1').replace(/S/g, '5').replace(/Z/g, '2').replace(/G/g, '6').replace(/B/g, '8');
+    if (!cleaned) continue;
+    const direct = normalizeToken(cleaned);
+    if (direct !== null) {
+      nums.push({ num: direct, raw: t, selected: true });
+    }
+  }
+  if (document.getElementById('ocrOrder').value === 'reverse') {
+    nums.reverse();
+  }
+  return nums;
+}
+
+// Inspects a wide '1' box inside a cell/grid: if its width/aspect is noticeably wider than
+// single-digit '1' boxes in the same screenshot, it is likely two adjacent '1's ("11") glued together.
+function collectWordsFromResult(res){
+  const out = [];
+  const rawWords = (res && res.data && res.data.words) || [];
+
+  // First pass: measure typical single-digit width for '1' vs other single digits
+  const single1Widths = [];
+  for (const w of rawWords) {
+    const b = w.bbox || {};
+    const h = Math.max(1, (b.y1 || 0) - (b.y0 || 0));
+    const width = Math.max(1, (b.x1 || 0) - (b.x0 || 0));
+    const n = normalizeToken(w.text);
+    if (n === 1 && Number(w.confidence || 0) >= 20 && h > 5) {
+      single1Widths.push(width);
+    }
+  }
+  single1Widths.sort((a, b) => a - b);
+  // Smallest quartile of '1' widths represents a true single '1'
+  const narrow1Width = single1Widths.length >= 2
+    ? single1Widths[0]
+    : (single1Widths[0] || 0);
+
+  for (const w of rawWords) {
+    const b = w.bbox || {};
+    const y0 = b.y0 || 0, y1 = b.y1 || 0, x0 = b.x0 || 0, x1 = b.y1 ? (b.x1 || 0) : (b.x1 || 0);
+    const h = Math.max(1, y1 - y0);
+    const width = Math.max(1, x1 - x0);
+    const conf = Number(w.confidence || 0);
+    if (conf < 22) continue;
+    const n = normalizeToken(w.text);
+    if (n === null) continue;
+
+    // If OCR read "11" as a single wide "1" (e.g., width >= 1.65x narrow single-'1' or width/height > 0.72 for a '1')
+    const looksLikeGlued11 = (
+      n === 1 &&
+      (
+        (narrow1Width > 0 && width >= narrow1Width * 1.62) ||
+        (width / h > 0.75 && width > 14)
+      )
+    );
+
+    if (looksLikeGlued11) {
+      const midX = (x0 + x1) / 2;
+      const midY = (y0 + y1) / 2;
+      const q1X = x0 + width * 0.25;
+      const q3X = x0 + width * 0.75;
+      out.push({ num: 11, conf, x: midX, y: midY, h, w: width, isSplit11: true, subX1: q1X, subX2: q3X });
+      out.push({ num: 1, conf: conf - 3, x: q1X, y: midY, h, w: width * 0.45, fromSplit11: true });
+      out.push({ num: 1, conf: conf - 3, x: q3X, y: midY, h, w: width * 0.45, fromSplit11: true });
+    } else {
+      out.push({
+        num: n,
+        conf,
+        x: (x0 + x1) / 2,
+        y: (y0 + y1) / 2,
+        h,
+        w: width
+      });
+    }
+  }
+  return out;
+}
+
+function mergeCandidateWords(wordLists){
+  const all = wordLists.flat().filter(it => it.h >= 6 && it.h <= 180 && it.w >= 4 && it.w <= 220);
+  if (!all.length) return '';
+
+  const medH = all.slice().sort((a, b) => a.h - b.h)[Math.floor(all.length / 2)].h;
+  const filtered = all.filter(it => it.h >= medH * 0.45 && it.h <= medH * 2.1);
+  const pool = filtered.length ? filtered : all;
+
+  pool.sort((a, b) => a.y - b.y || a.x - b.x);
+  const rowTol = Math.max(10, medH * 0.65);
+  const rows = [];
+
+  for (const it of pool) {
+    let row = rows.find(r => Math.abs(r.y - it.y) <= rowTol);
+    if (!row) {
+      row = { y: it.y, cells: [] };
+      rows.push(row);
+    }
+    // Check if an existing cell is at virtually the same X/Y position (duplicate from multi-pass)
+    const samePosIdx = row.cells.findIndex(c =>
+      Math.abs(c.x - it.x) < Math.max(9, Math.min(c.w, it.w) * 0.55) &&
+      Math.abs(c.y - it.y) < rowTol
+    );
+    if (samePosIdx === -1) {
+      row.cells.push(it);
+      row.y = row.cells.reduce((s, c) => s + c.y, 0) / row.cells.length;
+    } else {
+      const existing = row.cells[samePosIdx];
+      // Prefer 11 over 1 when a wide box at the same spot was detected as glued 11
+      if (it.num === 11 && existing.num === 1 && (it.conf || 0) >= (existing.conf || 0) - 8) {
+        row.cells[samePosIdx] = it;
+      } else if (existing.num === 11 && it.num === 1 && (existing.conf || 0) >= (it.conf || 0) - 8) {
+        // keep 11
+      } else if ((it.conf || 0) > (existing.conf || 0) + 4) {
+        row.cells[samePosIdx] = it;
+      }
+    }
+  }
+
+  rows.sort((a, b) => a.y - b.y);
+  return rows.map(r => r.cells.sort((a, b) => a.x - b.x).map(c => c.num).join(', ')).join('\n');
+}
+
+async function readNumbersFromScreenshot(){
+  if (ocrBusy) return;
+  if (!currentOcrImage) {
+    document.getElementById('ocrStatus').textContent = '❌ Pehle screenshot select ya Ctrl+V se paste karein.';
+    return;
+  }
+
+  ocrBusy = true;
+  const btn = document.getElementById('readOcrBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Converting...';
+  const t0 = performance.now();
+
+  try {
+    setOcrProgress(10, 'Initializing OCR engine...');
+    const worker = await ensureTesseractWorker();
+
+    const natW = currentOcrImage.naturalWidth || currentOcrImage.width;
+    const natH = currentOcrImage.naturalHeight || currentOcrImage.height;
+    const targetMax = 1800;
+    const scale = Math.max(natW, natH) > targetMax ? (targetMax / Math.max(natW, natH)) : (Math.max(natW, natH) < 900 ? 1.8 : 1.25);
+    const baseCanvas = canvasFromImage(currentOcrImage, scale);
+    const channel = document.getElementById('ocrChannel').value || 'max';
+    const mode = document.getElementById('ocrMode').value || 'fast-auto';
+
+    let plainText = '';
+
+    if (mode === 'roulette-grid' && baseCanvas.height > 260) {
+      const splitY = Math.round(baseCanvas.height * 0.255);
+      const topC = document.createElement('canvas');
+      topC.width = baseCanvas.width; topC.height = splitY;
+      topC.getContext('2d').drawImage(baseCanvas, 0, 0, baseCanvas.width, splitY, 0, 0, baseCanvas.width, splitY);
+
+      const gridC = document.createElement('canvas');
+      gridC.width = baseCanvas.width; gridC.height = baseCanvas.height - splitY;
+      gridC.getContext('2d').drawImage(baseCanvas, 0, splitY, baseCanvas.width, gridC.height, 0, 0, gridC.width, gridC.height);
+
+      setOcrProgress(25, 'Reading top strip...');
+      const rTop1 = await worker.recognize(preprocessCanvas(topC, channel));
+      const rTop2 = await worker.recognize(preprocessCanvas(topC, 'binarize'));
+
+      setOcrProgress(55, 'Reading number matrix...');
+      const rGrid1 = await worker.recognize(preprocessCanvas(gridC, channel));
+      const rGrid2 = await worker.recognize(preprocessCanvas(gridC, 'binarize'));
+
+      const topLine = mergeCandidateWords([collectWordsFromResult(rTop1), collectWordsFromResult(rTop2)]);
+      const gridLines = mergeCandidateWords([collectWordsFromResult(rGrid1), collectWordsFromResult(rGrid2)]);
+      plainText = [topLine, gridLines].filter(Boolean).join('\n');
+    } else {
+      setOcrProgress(25, 'Pass 1: Reading digits with color/red boost...');
+      const res1 = await worker.recognize(preprocessCanvas(baseCanvas, channel));
+      setOcrProgress(60, 'Pass 2: High-contrast binary verification...');
+      const res2 = await worker.recognize(preprocessCanvas(baseCanvas, 'binarize'));
+      plainText = mergeCandidateWords([collectWordsFromResult(res1), collectWordsFromResult(res2)]);
+    }
+
+    document.getElementById('ocrPlainText').value = plainText;
+    syncFromPlainText();
+
+    const sec = ((performance.now() - t0) / 1000).toFixed(1);
+    setOcrProgress(100, `✅ Done in ${sec}s! ${ocrResults.length} valid numbers extracted into Plain Text.`);
+  } catch (err) {
+    console.error(err);
+    document.getElementById('ocrStatus').textContent = '❌ OCR Error: ' + (err?.message || String(err));
+  } finally {
+    ocrBusy = false;
+    btn.disabled = false;
+    btn.textContent = '🔄 Re-Extract Plain Text';
+  }
+}
+
+function syncFromPlainText(){
+  const txt = document.getElementById('ocrPlainText').value;
+  ocrResults = extractNumbersFromPlainText(txt);
+  renderOcrResults();
+}
+
+function cleanPlainTextToCsv(){
+  syncFromPlainText();
+  const csv = ocrResults.filter(x => x.selected).map(x => x.num).join(', ');
+  document.getElementById('ocrPlainText').value = csv;
+  syncFromPlainText();
+}
+
+function copyPlainText(){
+  const box = document.getElementById('ocrPlainText');
+  if (!box.value.trim()) return;
+  navigator.clipboard?.writeText(box.value);
+  document.getElementById('ocrStatus').textContent = '📋 Plain text copied to clipboard!';
+}
+
+function renderOcrResults(){
+  const wrap = document.getElementById('ocrDetected');
+  const actions = document.getElementById('ocrPunchActions');
+  const header = document.getElementById('ocrChipHeader');
+  const selectedCount = ocrResults.filter(x => x.selected).length;
+
+  header.textContent = `Extracted Valid Numbers (0–36): ${selectedCount} / ${ocrResults.length}`;
+
+  if (!ocrResults.length) {
+    wrap.innerHTML = `<span style="font-size:.76rem;color:var(--muted);padding:4px;">No valid numbers (0–36) yet.</span>`;
+    actions.style.display = 'none';
+    return;
+  }
+
+  actions.style.display = 'flex';
+  wrap.innerHTML = ocrResults.map((item, idx) => `
+    <button type="button" class="ocr-chip ${getColorClass(item.num)} ${item.selected ? '' : 'off'}" onclick="toggleOcrChip(${idx})">
+      ${item.num}
+      <small>#${idx + 1}</small>
+    </button>
+  `).join('');
+}
+
+function toggleOcrChip(idx){
+  if (ocrResults[idx]) {
+    ocrResults[idx].selected = !ocrResults[idx].selected;
+    renderOcrResults();
+  }
+}
+
+function selectAllOcr(){
+  ocrResults.forEach(x => x.selected = true);
+  renderOcrResults();
+}
+
+function clearOcrSelection(){
+  ocrResults.forEach(x => x.selected = false);
+  renderOcrResults();
+}
+
+function punchDetectedNumbers(){
+  const nums = ocrResults.filter(x => x.selected).map(x => x.num);
+  if (!nums.length) {
+    document.getElementById('ocrStatus').textContent = '⚠️ Koi number selected nahi hai.';
+    return;
+  }
+  for (let i = nums.length - 1; i >= 0; i--) {
+    spins.unshift(nums[i]);
+  }
+  spins = spins.slice(0, 500);
+  saveSpins();
+  renderAll();
+  document.getElementById('ocrStatus').textContent = `✅ ${nums.length} numbers punched into Analyzer!`;
+  closeOcrModal();
+}
+
+  buildKeypad();
+  renderAll();
+</script>
+</body>
+</html>
+Yeh sab series aur digit-mirror patterns (M9) analyzer mein add kar diye gaye hain — Series Hints (probability % ke saath) aur Top Number Hints dono mein.
+
+Kya Naya Add Hua Hai (M9):
+Digit-Swap Mirror (31 ↔ 13, 12 ↔ 21, 23 ↔ 32): Jab koi number aata hai (especially repeat hone par, jaise 31 → 31), toh uske reverse-digit mirror number (13) ko boost aur alert milta hai.
+
+Ending-Digit Series (Series 0–9):
+
+1 Series: 1, 11, 21, 31
+
+4 Series: 4, 14, 24, 34
+
+5 Series: 5, 15, 25, 35
+
+7 Series: 7, 17, 27
+
+8 Series: 8, 18, 28 (aur baaki 0–9 ending families)
+
+6–9 Series (6, 9, 16, 19, 26, 29, 36): Ending 6 aur 9 wale numbers ki family ko series hint aur score boost milta hai.
+
+2nd Column Odd Series (11, 17, 29, 35 + 5, 23): Roulette ke 2nd column (2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35) ke odd numbers ki series hint aur scoring add ki gayi hai.
+
+eske alawa jaise 9 diya 6 diya 9+6 or 9-6 jaisa algorethem history me dikhe
+
+Your updated HTML file is ready:
+
+HTML icon
+index
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roulette Pattern & Next-Number Hint Analyzer (Multi-Method + Probabilities)</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --panel-2: #1f242e;
+      --border: #2c323f;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --accent: #2dd4bf;
+      --red: #dc2626;
+      --black: #1e232d;
+      --green: #16a34a;
+      --warn: #f59e0b;
+      --purple: #a78bfa;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 14px; max-width: 1120px; margin: 0 auto; }
+
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+      gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 14px;
+    }
+    header h1 { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .badge { background: rgba(45, 212, 191, 0.14); color: var(--accent); border: 1px solid rgba(45, 212, 191, 0.35); padding: 3px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .badge.purple { background: rgba(167, 139, 250, 0.15); color: var(--purple); border-color: rgba(167, 139, 250, 0.4); }
+
+    .controls-bar {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
+      background: var(--panel); padding: 10px; border-radius: 10px; border: 1px solid var(--border);
+    }
+    .controls-bar input {
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 12px; border-radius: 8px; font-size: 0.9rem; flex: 1; min-width: 180px;
+    }
+    button {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      padding: 8px 12px; border-radius: 8px; font-size: 0.83rem; font-weight: 600; cursor: pointer; transition: 0.15s;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); color: #081214; border-color: var(--accent); }
+    button.purple-btn { background: rgba(167, 139, 250, 0.18); color: #ddd6fe; border-color: rgba(167, 139, 250, 0.5); }
+    button.danger { background: rgba(220, 38, 38, 0.15); color: #fca5a5; border-color: rgba(220, 38, 38, 0.5); }
+    button.danger:hover { background: rgba(220, 38, 38, 0.28); border-color: #ef4444; }
+
+    /* Latest Strip */
+    .latest-strip {
+      display: flex; align-items: center; gap: 6px; overflow-x: auto; min-height: 54px;
+      background: var(--panel); padding: 10px; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 14px;
+    }
+    .strip-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; margin-right: 4px; white-space: nowrap; }
+    .num-pill {
+      min-width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 6px; font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
+    }
+    .num-pill.latest { outline: 2px solid #fff; outline-offset: 2px; transform: scale(1.05); }
+    .c-red { background: var(--red); color: #fff; }
+    .c-black { background: var(--black); color: #e5e7eb; border: 1px solid #374151; }
+    .c-green { background: var(--green); color: #fff; }
+
+    /* Quick 6-Hint Bar */
+    .quick-hints-bar {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+      background: rgba(45, 212, 191, 0.06); border: 1px solid rgba(45, 212, 191, 0.25);
+      border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+    }
+    .quick-hints-title { font-size: 0.76rem; font-weight: 700; color: var(--accent); text-transform: uppercase; margin-right: 4px; }
+
+    /* Layout Grid */
+    .main-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px; }
+    @media (max-width: 860px) { .main-grid { grid-template-columns: 1fr; } }
+
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+    .card-title { font-size: 0.9rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+
+    /* Hint List */
+    .hint-item {
+      display: flex; align-items: flex-start; gap: 10px; padding: 9px;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px;
+    }
+    .hint-info { flex: 1; }
+    .hint-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; gap: 6px; flex-wrap: wrap; }
+    .hint-tag { font-size: 0.72rem; font-weight: 700; color: var(--warn); text-transform: uppercase; }
+    .hint-score { font-size: 0.75rem; color: var(--accent); font-weight: 600; }
+    .hint-reason { font-size: 0.82rem; color: #d1d5db; line-height: 1.4; }
+    .src-sys { color: var(--accent); font-weight: 600; }
+    .src-usr { color: var(--purple); font-weight: 600; }
+    .src-whl { color: #fbbf24; font-weight: 600; }
+
+    /* Pattern Alerts */
+    .alert-box {
+      background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 8px; padding: 9px; margin-bottom: 8px; font-size: 0.82rem; line-height: 1.4;
+    }
+    .alert-box.user-hit {
+      background: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.45);
+    }
+
+    .empty-state {
+      text-align: center; padding: 24px 12px; color: var(--muted); font-size: 0.85rem;
+      background: var(--panel-2); border-radius: 8px; border: 1px dashed var(--border);
+    }
+
+    /* Custom Rules Mini List inside Card */
+    .rule-chip {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px;
+      padding: 7px 9px; margin-bottom: 6px; font-size: 0.78rem;
+    }
+    .rule-chip.active-rule { border-color: rgba(167, 139, 250, 0.65); background: rgba(167, 139, 250, 0.08); }
+    .rule-chip-text { flex: 1; line-height: 1.3; }
+
+    /* Quick Keypad */
+    .keypad { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin-top: 8px; }
+    @media (max-width: 500px) { .keypad { grid-template-columns: repeat(7, 1fr); } }
+    .key-btn {
+      padding: 9px 0; border-radius: 6px; font-weight: 700; font-size: 0.85rem; text-align: center; border: none;
+    }
+
+    /* 12-Column History Matrix */
+    .matrix-grid {
+      display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px;
+      background: #0b0d10; padding: 6px; border-radius: 8px; border: 1px solid var(--border); min-height: 60px;
+    }
+    .matrix-cell {
+      aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+      font-size: 0.78rem; font-weight: 700; border-radius: 4px;
+    }
+    .matrix-cell.first { outline: 2px solid #fff; z-index: 1; }
+
+    /* Stats & Slider */
+    .slider-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
+    .slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+    .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .stat-box { background: var(--panel-2); padding: 8px; border-radius: 8px; text-align: center; border: 1px solid var(--border); }
+    .stat-box .val { font-size: 1rem; font-weight: 700; color: #fff; }
+    .stat-box .lbl { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+
+    /* Modals */
+    .modal-backdrop {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.78);
+      align-items: center; justify-content: center; padding: 16px; z-index: 50; overflow-y: auto;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: 100%; max-width: 540px; }
+    .modal textarea, .modal input, .modal select {
+      width: 100%; background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; margin-top: 6px; font-size: 0.85rem;
+    }
+    .form-group { margin-bottom: 10px; }
+    .form-group label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; }
+    .disclaimer { margin-top: 14px; font-size: 0.75rem; color: var(--muted); text-align: center; }
+
+    .method-strip {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;
+    }
+    .method-pill {
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px;
+      padding: 5px 8px; font-size: 0.73rem; color: #d1d5db; flex: 1; min-width: 145px;
+    }
+    .method-pill strong { color: var(--accent); display: block; font-size: 0.75rem; margin-bottom: 1px; }
+    .prob-bar-wrap {
+      width: 100%; height: 5px; background: #0e1116; border-radius: 999px;
+      overflow: hidden; margin-top: 6px; border: 1px solid rgba(255,255,255,0.05);
+    }
+    .prob-bar-fill {
+      height: 100%; background: linear-gradient(90deg, var(--accent), #38bdf8);
+      border-radius: 999px;
+    }
+    .hint-prob-tag {
+      background: rgba(45, 212, 191, 0.14); color: var(--accent);
+      border: 1px solid rgba(45, 212, 191, 0.35); padding: 2px 7px;
+      border-radius: 999px; font-size: 0.73rem; font-weight: 700;
+    }
+
+  
+
+/* ================= FAST OCR & PLAIN TEXT EXTRACTOR UI ================= */
+.ocr-modal{max-width:780px}
+.ocr-dropzone{
+  margin-top:8px;border:1.5px dashed var(--accent);background:rgba(45,212,191,0.05);
+  border-radius:10px;padding:12px;text-align:center;cursor:pointer;transition:.15s;
+}
+.ocr-dropzone:hover{background:rgba(45,212,191,0.11)}
+.ocr-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.ocr-file{width:100%;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:7px;border-radius:8px;margin-top:6px}
+.ocr-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+@media(max-width:680px){.ocr-grid-2{grid-template-columns:1fr}}
+.ocr-preview-wrap{background:#0b0d10;border:1px solid var(--border);border-radius:8px;padding:6px;max-height:260px;overflow:auto;text-align:center;display:flex;align-items:center;justify-content:center;min-height:140px}
+.ocr-preview{max-width:100%;max-height:244px;height:auto;display:none;border-radius:5px}
+.ocr-plain-box{width:100%;height:190px;background:#0b0d10;color:#2dd4bf;border:1px solid var(--border);border-radius:8px;padding:9px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;line-height:1.45;resize:vertical}
+.ocr-status{margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--panel-2);font-size:.78rem;color:var(--text);line-height:1.45;border-left:3px solid var(--accent)}
+.ocr-detected{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;max-height:150px;overflow:auto;padding:4px;background:#0b0d10;border:1px solid var(--border);border-radius:8px}
+.ocr-chip{min-width:40px;padding:5px 7px;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;color:#fff;font-weight:800;cursor:pointer;font-size:.82rem}
+.ocr-chip.c-red{background:var(--red);border-color:#ef4444}
+.ocr-chip.c-green{background:var(--green);border-color:#22c55e}
+.ocr-chip small{display:block;font-size:.58rem;color:rgba(255,255,255,0.75);font-weight:500;margin-top:1px}
+.ocr-chip.off{opacity:.3;text-decoration:line-through}
+.ocr-actions{display:none;flex-wrap:wrap;gap:7px;margin-top:9px}
+.ocr-progress{height:7px;background:#0b0d10;border:1px solid var(--border);border-radius:999px;overflow:hidden;margin-top:8px;display:none}
+.ocr-progress > div{height:100%;width:0;background:var(--accent);transition:width .15s}
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>
+    📊 Roulette Pattern & Hint Engine
+    <span class="badge" id="totalCountBadge">0 Spins</span>
+    <span class="badge purple" id="ruleCountBadge">0 Custom Rules</span>
+  </h1>
+  <div style="display:flex; flex-wrap:wrap; gap:6px;">
+    <button class="purple-btn" onclick="openRuleModal()">⚙️ + Add Custom Pattern/Rule</button>
+    <button onclick="openBulkModal()">📋 Paste Numbers</button><button class="primary" onclick="openOcrModal()">📷 Screenshot → Numbers</button>
+    <button onclick="undoLast()">↩ Undo</button>
+    <button class="danger" onclick="clearAllData()">🗑️ Clear All</button>
+    <button onclick="loadSampleData()">↺ Sample</button>
+  </div>
+</header>
+
+<div class="controls-bar">
+  <input type="number" id="spinInput" min="0" max="36" placeholder="Type latest spin (0–36) & press Enter..." onkeydown="if(event.key==='Enter') punchFromInput()" />
+  <button class="primary" onclick="punchFromInput()">+ Punch Number</button>
+  <button onclick="simulateRandom(1)">🎲 Sim +1</button>
+  <button onclick="simulateRandom(25)">🎲 Sim +25</button>
+</div>
+
+<div class="latest-strip" id="latestStrip"></div>
+
+<div class="main-grid">
+  <!-- Left: 6 Unified Hints + User Rules + Keypad -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+    <div class="card">
+      <div class="card-title">
+        <span id="hintsCardTitle">🎯 Top 8 Multi-Method Hints & Probabilities</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <label style="font-size:0.74rem;color:var(--muted);font-weight:600;">Hints:</label>
+          <select id="hintCountSelect" onchange="renderAll()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 7px;font-size:0.76rem;font-weight:700;">
+            <option value="7">7 Numbers</option>
+            <option value="8" selected>8 Numbers</option>
+            <option value="10">10 Numbers</option>
+            <option value="12">12 Numbers</option>
+          </select>
+          <span id="coverageBadge" style="font-size:0.74rem; color:var(--muted);">Single: 2.70% | 8-Num: 21.62%</span>
+        </div>
+      </div>
+      <div id="methodSummaryBar"></div>
+      <div id="quickHintsBar"></div>
+      <div id="patternAlerts"></div>
+      <div id="hintsContainer"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span>🧠 Your Custom Patterns & Algorithms</span>
+        <button class="purple-btn" style="padding:4px 9px; font-size:0.75rem;" onclick="openRuleModal()">+ New Rule</button>
+      </div>
+      <div id="customRulesList"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span>⚡ One-Tap Number Punch Pad (Tap to Add)</span></div>
+      <div class="keypad" id="keypad"></div>
+    </div>
+  </div>
+
+  <!-- Right: 12-Col Matrix & Stats -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+    <div class="card">
+      <div class="card-title">
+        <span>🔢 Spin History Matrix (12-Col)</span>
+        <span id="windowLabel" class="badge">LAST 0 ROUNDS</span>
+      </div>
+      <div class="matrix-grid" id="matrixGrid"></div>
+      <div class="slider-row">
+        <span>Window:</span>
+        <input type="range" id="windowSlider" min="12" max="500" value="120" oninput="renderAll()" />
+        <strong id="sliderVal">120</strong>
+      </div>
+      <div class="stat-row" id="outsideStats"></div>
+    </div>
+  </div>
+</div>
+
+<p class="disclaimer">
+  Analytical & statistical pattern tool only. Every roulette spin is an independent random event (2.70% per pocket); system and user pattern rules are analytical signals, not guarantees.
+</p>
+
+<!-- Bulk Import Modal -->
+<div class="modal-backdrop" id="bulkModal">
+  <div class="modal">
+    <h3 style="font-size:1rem;">Paste New Numbers (Latest First)</h3>
+    <p style="font-size:0.8rem; color:var(--muted); margin-top:4px;">
+      Comma, space, ya new line se numbers paste karein (e.g., <code>2, 12, 7, 28, 12, 7...</code>):
+    </p>
+    <textarea id="bulkText" style="height:120px;" placeholder="Yahan apne numbers paste karein..."></textarea>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+      <button onclick="closeBulkModal()">Cancel</button>
+      <button class="primary" onclick="applyBulkImport()">Load Numbers</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Screenshot to Plain Text & Numbers Modal -->
+<div class="modal-backdrop" id="ocrModal">
+  <div class="modal ocr-modal">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <h3 style="font-size:1rem;color:var(--accent);">📷 Fast Screenshot → Plain Text & Numbers</h3>
+      <span class="badge">Single-Pass Worker • Auto-Extract</span>
+    </div>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:4px;">
+      Screenshot upload karein ya seedha <b>Ctrl+V (Paste)</b> karein — system turant screenshot ko <b>Plain Text</b> mein convert karke valid numbers (0–36) extract kar dega.
+    </p>
+
+    <div class="ocr-dropzone" onclick="document.getElementById('ocrFile').click()">
+      <div style="font-size:.86rem;font-weight:700;color:var(--text);">📁 Click to Choose Screenshot or Press Ctrl+V to Paste Image</div>
+      <div style="font-size:.73rem;color:var(--muted);margin-top:3px;">Auto-reads immediately upon upload • Supports Red, Black/White & Green digits</div>
+      <input class="ocr-file" type="file" id="ocrFile" accept="image/*" style="display:none" onchange="handleOcrFileSelect()">
+    </div>
+
+    <div class="ocr-row">
+      <div style="flex:1;min-width:170px;">
+        <label style="display:block;font-size:.75rem;color:var(--muted);font-weight:600;">Layout / Mode</label>
+        <select id="ocrMode" style="width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px;margin-top:4px;">
+          <option value="fast-auto">⚡ Fast Full-Image Plain Text (1–2 sec)</option>
+          <option value="roulette-grid">🎯 Roulette Grid + Top Strip (High Accuracy)</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:170px;">
+        <label style="display:block;font-size:.75rem;color:var(--muted);font-weight:600;">Number Order</label>
+        <select id="ocrOrder" onchange="syncFromPlainText()" style="width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px;margin-top:4px;">
+          <option value="shown">Top → Bottom, Left → Right (Latest First)</option>
+          <option value="reverse">Reverse Order (Bottom → Top)</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:160px;">
+        <label style="display:block;font-size:.75rem;color:var(--muted);font-weight:600;">Color Channel</label>
+        <select id="ocrChannel" style="width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px;margin-top:4px;">
+          <option value="max">Max RGB (Best for Red + White)</option>
+          <option value="contrast">High Contrast Boost</option>
+          <option value="gray">Standard Grayscale</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="ocr-progress" id="ocrProgress"><div id="ocrProgressBar"></div></div>
+    <div class="ocr-status" id="ocrStatus">Ready: Screenshot select karein ya paste karein — automatic plain text conversion shuru ho jayega.</div>
+
+    <div class="ocr-grid-2">
+      <div>
+        <div style="font-size:.75rem;font-weight:700;color:var(--muted);margin-bottom:4px;">🖼️ Screenshot Preview</div>
+        <div class="ocr-preview-wrap" id="ocrPreviewWrap">
+          <span id="ocrNoImgHint" style="font-size:.78rem;color:var(--muted);">No image loaded</span>
+          <img id="ocrPreview" class="ocr-preview" alt="Screenshot preview">
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:.75rem;font-weight:700;color:var(--accent);">📝 Converted Plain Text (Editable)</span>
+          <div style="display:flex;gap:5px;">
+            <button style="padding:3px 8px;font-size:.72rem;" onclick="cleanPlainTextToCsv()">🧹 Format CSV</button>
+            <button style="padding:3px 8px;font-size:.72rem;" onclick="copyPlainText()">📋 Copy Text</button>
+          </div>
+        </div>
+        <textarea id="ocrPlainText" class="ocr-plain-box" placeholder="Converted plain text yahan dikhega... Aap isko directly edit ya copy bhi kar sakte hain." oninput="syncFromPlainText()"></textarea>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:9px;">
+      <span style="font-size:.78rem;font-weight:700;color:var(--accent);" id="ocrChipHeader">Extracted Valid Numbers (0–36): 0</span>
+      <span style="font-size:.72rem;color:var(--muted);">Tap any chip to toggle</span>
+    </div>
+    <div id="ocrDetected" class="ocr-detected"></div>
+
+    <div class="ocr-actions" id="ocrPunchActions">
+      <button onclick="selectAllOcr()">✓ Select All</button>
+      <button onclick="clearOcrSelection()">Clear Selection</button>
+      <button class="primary" onclick="punchDetectedNumbers()">⚡ Punch Selected into Analyzer</button>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+      <button onclick="closeOcrModal()">Close</button>
+      <button class="primary" id="readOcrBtn" onclick="readNumbersFromScreenshot()">🔄 Re-Extract Plain Text</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Rule / Pattern Modal -->
+<div class="modal-backdrop" id="ruleModal">
+  <div class="modal">
+    <h3 style="font-size:1rem; color:var(--purple);">⚙️ Add User Pattern / Prediction Rule</h3>
+    <p style="font-size:0.78rem; color:var(--muted); margin-top:3px; margin-bottom:10px;">
+      Apna pattern ya trigger logic define karein — har naye spin par system aur aapke rules dono milkar 6 next-number hints banayenge.
+    </p>
+
+    <div class="form-group">
+      <label>Rule Name / Note (Optional)</label>
+      <input type="text" id="ruleName" placeholder="e.g., After 0 or 15 hit 26, or Red streak reversal" />
+    </div>
+
+    <div class="form-group">
+      <label>Trigger Condition (Kab Activate Ho?)</label>
+      <select id="ruleType" onchange="toggleRuleConditionInputs()">
+        <option value="AFTER_NUM">1. Jab Latest Number Inmein Se Ho (e.g., 0, 15)</option>
+        <option value="REPEAT_X">2. Jab Koi Number Repeat Ho (X → X)</option>
+        <option value="SANDWICH_ABA">3. Jab Sandwich / Mirror Pattern Bane (A-B-A ya A-B-C-A)</option>
+        <option value="COLOR_STREAK">4. Jab Lagatar N Spins Tak Red ya Black Aaye</option>
+        <option value="DOZEN_HIT">5. Jab Latest Number Kis Dozen Mein Ho (1st / 2nd / 3rd)</option>
+      </select>
+    </div>
+
+    <div class="form-group" id="condNumbersGroup">
+      <label>Trigger Numbers (0–36, comma separated)</label>
+      <input type="text" id="condNumbers" placeholder="e.g., 0, 15" />
+    </div>
+
+    <div class="form-group" id="condStreakGroup" style="display:none;">
+      <label>Color & Streak Count (e.g., RED:3 ya BLACK:4)</label>
+      <input type="text" id="condStreak" placeholder="RED:3" value="RED:3" />
+    </div>
+
+    <div class="form-group" id="condDozenGroup" style="display:none;">
+      <label>Dozen (1 = 1–12, 2 = 13–24, 3 = 25–36)</label>
+      <select id="condDozen">
+        <option value="1">1st Dozen (1–12)</option>
+        <option value="2">2nd Dozen (13–24)</option>
+        <option value="3">3rd Dozen (25–36)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Hint / Target Numbers to Suggest (0–36, comma separated)</label>
+      <input type="text" id="targetNumbers" placeholder="e.g., 26, 32, 19, 8, 15, 0" />
+    </div>
+
+    <div class="form-group">
+      <label>Priority Weight (10 to 50)</label>
+      <input type="number" id="ruleWeight" min="10" max="50" value="28" />
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+      <button onclick="closeRuleModal()">Cancel</button>
+      <button class="primary" onclick="saveCustomRule()">Save Rule</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const RED_NUMS = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
+  const WHEEL_ORDER = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+
+  const DEFAULT_SPINS = [
+    2,12,7,28,12,7,20,14,7,35,31,7,4,23,
+    4,23,21,17,8,36,24,7,36,16,23,18,10,16,30,5,34,6,12,26,5,25,
+    18,29,28,3,27,17,24,16,5,0,19,6,35,17,3,25,19,24,32,0,15,0,
+    36,13,13,31,20,29,22,2,18,14,10,19,26,3,18,12,24,27,13,21,23,19,
+    34,7,2,10,29,16,32,32,14,16,33,18,16,8,27,29,24,26,22,36,7,26,
+    33,26,2,24,24,8,24,2,12,15,34,30,0,20,20,21,19,8,18,34,27,28,
+    11,11,9,19,9,8,27,12,26,10,9,2,26,1,36,25,36,19,7,21,34,17,
+    11,22,11,22,9,19,17,33,26,22,30,14,25,26,29,34,15,35,5,5,11,10,
+    31,29,12,18,18,31,1,23,19,8,16,35,24,9,35,6,0,19,1,29,12,11,
+    35,10,2,30,25,28,36,26,1,35,22
+  ];
+
+  let savedRaw = localStorage.getItem('roulette_spins_v5');
+  let spins = savedRaw !== null ? JSON.parse(savedRaw) : [...DEFAULT_SPINS];
+  let customRules = JSON.parse(localStorage.getItem('roulette_custom_rules_v1') || '[]');
+
+  function getColor(n) {
+    if (n === 0) return 'GREEN';
+    return RED_NUMS.has(n) ? 'RED' : 'BLACK';
+  }
+
+  function getColorClass(n) {
+    if (n === 0) return 'c-green';
+    return RED_NUMS.has(n) ? 'c-red' : 'c-black';
+  }
+
+  // Returns wheel neighbors with exact slot distance & direction relative to `num`
+  function getWheelNeighborsDetailed(num, maxRadius = 6) {
+    const idx = WHEEL_ORDER.indexOf(num);
+    if (idx === -1) return [];
+    const res = [];
+    for (let step = 1; step <= maxRadius; step++) {
+      const rightIdx = (idx + step) % WHEEL_ORDER.length;
+      const leftIdx = (idx - step + WHEEL_ORDER.length) % WHEEL_ORDER.length;
+      const ord = step === 1 ? '1st' : step === 2 ? '2nd' : step === 3 ? '3rd' : `${step}th`;
+      res.push({
+        num: WHEEL_ORDER[rightIdx],
+        step,
+        label: `${ord} Right of wheel #${num}`
+      });
+      res.push({
+        num: WHEEL_ORDER[leftIdx],
+        step,
+        label: `${ord} Left of wheel #${num}`
+      });
+    }
+    return res;
+  }
+
+  function saveSpins() {
+    localStorage.setItem('roulette_spins_v5', JSON.stringify(spins.slice(0, 500)));
+  }
+
+  function saveRules() {
+    localStorage.setItem('roulette_custom_rules_v1', JSON.stringify(customRules));
+  }
+
+  function punchNumber(n) {
+    if (isNaN(n) || n < 0 || n > 36) return;
+    spins.unshift(n);
+    if (spins.length > 500) spins.pop();
+    saveSpins();
+    renderAll();
+  }
+
+  function punchFromInput() {
+    const inp = document.getElementById('spinInput');
+    const val = parseInt(inp.value, 10);
+    if (!isNaN(val) && val >= 0 && val <= 36) {
+      punchNumber(val);
+      inp.value = '';
+    }
+  }
+
+  function simulateRandom(count) {
+    for (let i = 0; i < count; i++) {
+      spins.unshift(Math.floor(Math.random() * 37));
+    }
+    spins = spins.slice(0, 500);
+    saveSpins();
+    renderAll();
+  }
+
+  function undoLast() {
+    if (spins.length > 0) {
+      spins.shift();
+      saveSpins();
+      renderAll();
+    }
+  }
+
+  function clearAllData() {
+    spins = [];
+    saveSpins();
+    document.getElementById('spinInput').value = '';
+    document.getElementById('bulkText').value = '';
+    renderAll();
+  }
+
+  function loadSampleData() {
+    spins = [...DEFAULT_SPINS];
+    saveSpins();
+    renderAll();
+  }
+
+  function evaluateCustomRules(windowSpins, scores, reasons, alerts, activeRuleIds) {
+    if (windowSpins.length === 0 || customRules.length === 0) return;
+
+    const latest = windowSpins[0];
+    const second = windowSpins[1];
+    const third = windowSpins[2];
+
+    customRules.forEach(rule => {
+      if (!rule.enabled) return;
+      let triggered = false;
+      let triggerDesc = '';
+
+      if (rule.type === 'AFTER_NUM') {
+        if (rule.triggerNums.includes(latest)) {
+          triggered = true;
+          triggerDesc = `Latest spin ${latest} matches [${rule.triggerNums.join(', ')}]`;
+        }
+      } else if (rule.type === 'REPEAT_X') {
+        if (second !== undefined && latest === second) {
+          if (rule.triggerNums.length === 0 || rule.triggerNums.includes(latest)) {
+            triggered = true;
+            triggerDesc = `Repeater ${latest} → ${latest} detected`;
+          }
+        }
+      } else if (rule.type === 'SANDWICH_ABA') {
+        if ((second !== undefined && latest === second) || (third !== undefined && latest === third)) {
+          triggered = true;
+          triggerDesc = `Mirror/Sandwich pattern matched around ${latest}`;
+        }
+      } else if (rule.type === 'COLOR_STREAK') {
+        const { color, count } = rule.streakConfig || { color: 'RED', count: 3 };
+        let streak = 0;
+        for (const n of windowSpins) {
+          if (getColor(n) === color) streak++;
+          else break;
+        }
+        if (streak >= count) {
+          triggered = true;
+          triggerDesc = `${streak}x ${color} streak active (target ≥ ${count})`;
+        }
+      } else if (rule.type === 'DOZEN_HIT') {
+        const d = rule.dozen || 1;
+        const inDozen = (d === 1 && latest >= 1 && latest <= 12) ||
+                        (d === 2 && latest >= 13 && latest <= 24) ||
+                        (d === 3 && latest >= 25 && latest <= 36);
+        if (inDozen) {
+          triggered = true;
+          triggerDesc = `Latest ${latest} is in Dozen ${d}`;
+        }
+      }
+
+      if (triggered) {
+        activeRuleIds.add(rule.id);
+        alerts.push(`<div class="alert-box user-hit">🧠 <strong>User Rule Triggered (${rule.name || rule.type}):</strong> ${triggerDesc} → Suggesting [${rule.targets.join(', ')}]</div>`);
+        rule.targets.forEach(tNum => {
+          scores[tNum] += rule.weight;
+          reasons[tNum].push(`<span class="src-usr">[User Rule: ${rule.name || rule.type}]</span> ${triggerDesc}`);
+        });
+      }
+    });
+  }
+
+  function analyzePatterns(windowSpins, hintCount = 8) {
+    const targetCount = Math.max(7, Math.min(14, parseInt(hintCount, 10) || 8));
+    if (windowSpins.length === 0) {
+      return { candidates: [], alerts: [], activeRuleIds: new Set(), methodSummary: [] };
+    }
+
+    const scores = {};
+    const reasons = {};
+    const lastSeenIdx = {};
+    for (let i = 0; i <= 36; i++) {
+      scores[i] = 0;
+      reasons[i] = [];
+      lastSeenIdx[i] = -1;
+    }
+
+    const freq = {};
+    const recent24Freq = {};
+    windowSpins.forEach((n, idx) => {
+      freq[n] = (freq[n] || 0) + 1;
+      if (idx < 24) recent24Freq[n] = (recent24Freq[n] || 0) + 1;
+      if (lastSeenIdx[n] === -1) lastSeenIdx[n] = idx;
+    });
+
+    const latest = windowSpins[0];
+    const second = windowSpins[1];
+    const third = windowSpins[2];
+    const alerts = [];
+    const activeRuleIds = new Set();
+
+    let repeaterTarget = latest;
+    let sandwichTarget = second !== undefined ? second : null;
+    let transitionTarget = null;
+    let wheelPrimaryTarget = null;
+    let hotTarget = null;
+    let overdueTarget = null;
+    let sectorTarget = null;
+    let zigzagTarget = null;
+    let zigzagLabel = '—';
+
+    // Method 1: Direct Repeater & Lag-2 Echo (X -> X and A-B-C-A echo)
+    scores[latest] += 22;
+    reasons[latest].push(`<span class="src-sys">[M1: Repeater]</span> Latest ${latest} repeat watch (${latest} → ${latest})`);
+    if (third !== undefined && third !== latest) {
+      scores[third] += 13;
+      reasons[third].push(`<span class="src-sys">[M1: Echo Lag-2]</span> 2-step echo around ${latest} (${third}..${latest}..${third})`);
+    }
+
+    // Method 2: Multi-Gap Mirror Sandwich Watch (1-gap A-B-A & 3-gap A-X-Y-Z-A) + Step-Lock (+2/+2, +3/+3, -2/-2, -3/-3)
+    if (second !== undefined) {
+      // 1-number gap mirror: windowSpins[1] -> windowSpins[0] -> [windowSpins[1]]
+      scores[second] += 25;
+      reasons[second].push(`<span class="src-sys">[M2: 1-Gap Sandwich]</span> Mirror setup (${second} - ${latest} - ${second})`);
+      alerts.push(`<div class="alert-box">🔄 <strong>Mirror Sandwich Watch (1-Gap):</strong> Latest <b>${latest}</b> ke pehle <b>${second}</b> tha — agar <b>${second}</b> aata hai toh <code>${second}-${latest}-${second}</code> sandwich banega.</div>`);
+      if (sandwichTarget === null) sandwichTarget = second;
+    }
+
+    // 3-number gap mirror: windowSpins[3] is 3 spins before windowSpins[0] (pattern A - [x1, x2, x3] - A)
+    if (windowSpins.length >= 4) {
+      const gap3Anchor = windowSpins[3];
+      const midGap3 = windowSpins.slice(0, 3).slice().reverse();
+      scores[gap3Anchor] += 22;
+      reasons[gap3Anchor].push(`<span class="src-sys">[M2: 3-Gap Sandwich]</span> 3-number gap mirror (${gap3Anchor} - [${midGap3.join(',')}] - ${gap3Anchor})`);
+      alerts.push(`<div class="alert-box">🪞 <strong>Mirror Sandwich Watch (3-Gap):</strong> 3 numbers (<code>${midGap3.join(' → ')}</code>) ke gap ke baad anchor <b>${gap3Anchor}</b> ka mirror return watch (<code>${gap3Anchor}..${gap3Anchor}</code>).</div>`);
+      if (sandwichTarget === null) sandwichTarget = gap3Anchor;
+    }
+
+    // Step-Lock Pattern Detection: +2/+2, +3/+3, -2/-2, -3/-3 (both numeric value & wheel-slot step)
+    if (windowSpins.length >= 3) {
+      const s0 = windowSpins[0];
+      const s1 = windowSpins[1];
+      const s2 = windowSpins[2];
+      const diff1 = s1 - s2;
+      const diff2 = s0 - s1;
+      const stepTargets = [2, 3, -2, -3];
+
+      // Numeric step lock (+2/+2, +3/+3, -2/-2, -3/-3)
+      if (stepTargets.includes(diff1) && diff1 === diff2) {
+        const nextNumStep = s0 + diff2;
+        if (nextNumStep >= 0 && nextNumStep <= 36) {
+          const signStr = diff2 > 0 ? `+${diff2}` : `${diff2}`;
+          scores[nextNumStep] += 27;
+          reasons[nextNumStep].push(`<span class="src-sys">[M2: Step Lock ${signStr}/${signStr}]</span> Pattern ${s2}→${s1}→${s0} (${signStr}, ${signStr}) → next ${nextNumStep}`);
+          alerts.push(`<div class="alert-box">📐 <strong>Step Pattern Lock (${signStr} / ${signStr}):</strong> Sequence <code>${s2} → ${s1} → ${s0}</code> mein lagatar <b>${signStr}</b> step chal raha hai — next target <b>${nextNumStep}</b>.</div>`);
+          sandwichTarget = nextNumStep;
+        }
+      } else if (stepTargets.includes(diff2)) {
+        // Emerging 1-step momentum (+2, +3, -2, -3)
+        const nextNumStep = s0 + diff2;
+        if (nextNumStep >= 0 && nextNumStep <= 36) {
+          const signStr = diff2 > 0 ? `+${diff2}` : `${diff2}`;
+          scores[nextNumStep] += 12;
+          reasons[nextNumStep].push(`<span class="src-sys">[M2: Step ${signStr}]</span> Latest shift ${s1}→${s0} (${signStr}) → next ${nextNumStep}`);
+        }
+      }
+
+      // Wheel-slot step lock (+2/+2, +3/+3, -2/-2, -3/-3 on WHEEL_ORDER)
+      const w2 = WHEEL_ORDER.indexOf(s2);
+      const w1 = WHEEL_ORDER.indexOf(s1);
+      const w0 = WHEEL_ORDER.indexOf(s0);
+      if (w2 !== -1 && w1 !== -1 && w0 !== -1) {
+        const lenW = WHEEL_ORDER.length;
+        const toSignedSlotStep = (fromIdx, toIdx) => {
+          let d = (toIdx - fromIdx + lenW) % lenW;
+          if (d > lenW / 2) d -= lenW;
+          return d;
+        };
+        const wStep1 = toSignedSlotStep(w2, w1);
+        const wStep2 = toSignedSlotStep(w1, w0);
+        if (stepTargets.includes(wStep1) && wStep1 === wStep2) {
+          const nextWIdx = (w0 + wStep2 + lenW) % lenW;
+          const nextWheelNum = WHEEL_ORDER[nextWIdx];
+          const signStr = wStep2 > 0 ? `+${wStep2}` : `${wStep2}`;
+          scores[nextWheelNum] += 26;
+          reasons[nextWheelNum].push(`<span class="src-whl">[M2: Wheel Step ${signStr}/${signStr}]</span> Wheel slots ${s2}→${s1}→${s0} (${signStr}, ${signStr}) → #${nextWheelNum}`);
+          alerts.push(`<div class="alert-box">🎡 <strong>Wheel Step Lock (${signStr} / ${signStr}):</strong> Wheel slots par <code>${s2} → ${s1} → ${s0}</code> mein <b>${signStr}</b> step lock — next wheel target <b>#${nextWheelNum}</b>.</div>`);
+          sandwichTarget = nextWheelNum;
+        }
+      }
+    }
+
+    // Method 3: Markov / Historical Transition Follow-up (what came right after `latest` historically)
+    const transitionCounts = {};
+    let transitionSamples = 0;
+    for (let i = 1; i < windowSpins.length; i++) {
+      if (windowSpins[i] === latest) {
+        const nextNum = windowSpins[i - 1];
+        transitionCounts[nextNum] = (transitionCounts[nextNum] || 0) + 1;
+        transitionSamples++;
+      }
+    }
+    const sortedTransitions = Object.entries(transitionCounts).sort((a, b) => b[1] - a[1]);
+    if (sortedTransitions.length > 0) {
+      sortedTransitions.slice(0, 3).forEach(([fStr, cnt], idx) => {
+        const follower = parseInt(fStr, 10);
+        if (idx === 0) transitionTarget = follower;
+        const pts = Math.max(8, 20 - idx * 5) + Math.min(8, cnt * 3);
+        const sharePct = ((cnt / Math.max(1, transitionSamples)) * 100).toFixed(0);
+        scores[follower] += pts;
+        reasons[follower].push(`<span class="src-sys">[M3: Transition]</span> Followed ${latest} in ${cnt}/${transitionSamples} historical cases (${sharePct}% share)`);
+      });
+    }
+
+    // Method 4: Wheel Neighbors & Voisins/Orphelins/Tiers Sector Affinity
+    const detailedNeighbors = getWheelNeighborsDetailed(latest, 6);
+    detailedNeighbors.forEach(nb => {
+      if (nb.step === 1 && wheelPrimaryTarget === null) wheelPrimaryTarget = nb.num;
+      if (nb.step <= 4) {
+        const pts = nb.step === 1 ? 19 : (nb.step === 2 ? 15 : (nb.step === 3 ? 11 : 7));
+        scores[nb.num] += pts;
+        reasons[nb.num].push(`<span class="src-whl">[M4: Wheel Slot]</span> ${nb.label}`);
+      }
+    });
+
+    const VOISINS = new Set([22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25]);
+    const TIERS = new Set([27,13,36,11,30,8,23,10,5,24,16,33]);
+    const latestSector = VOISINS.has(latest) ? 'VOISINS' : (TIERS.has(latest) ? 'TIERS' : 'ORPHELINS');
+    const sectorSet = latestSector === 'VOISINS' ? VOISINS : (latestSector === 'TIERS' ? TIERS : new Set([1,20,14,31,9,17,34,6]));
+    const last4SectorHits = windowSpins.slice(0, 4).filter(n => sectorSet.has(n)).length;
+    if (last4SectorHits >= 2) {
+      for (const sNum of sectorSet) {
+        if (sNum !== latest) {
+          scores[sNum] += 6;
+          reasons[sNum].push(`<span class="src-whl">[M4: ${latestSector} Sector]</span> Active wheel sector (${last4SectorHits}/4 recent hits)`);
+          if (sectorTarget === null) sectorTarget = sNum;
+        }
+      }
+    }
+
+    // Method 5: Blended Hot Frequency (Window + Recent-24 Momentum)
+    const combinedFreqRank = [];
+    for (let n = 0; n <= 36; n++) {
+      const wHits = freq[n] || 0;
+      const rHits = recent24Freq[n] || 0;
+      const momentumScore = (wHits / Math.max(1, windowSpins.length)) * 37 + rHits * 1.4;
+      combinedFreqRank.push({ n, wHits, rHits, momentumScore });
+    }
+    combinedFreqRank.sort((a, b) => b.momentumScore - a.momentumScore);
+    if (combinedFreqRank[0]) hotTarget = combinedFreqRank[0].n;
+    combinedFreqRank.slice(0, 7).forEach((item, rank) => {
+      if (item.wHits > 0) {
+        const pts = Math.max(5, 16 - rank * 2);
+        scores[item.n] += pts;
+        reasons[item.n].push(`<span class="src-sys">[M5: Hot Momentum]</span> ${item.wHits} hits / ${windowSpins.length} spins (${item.rHits} in last 24)`);
+      }
+    });
+
+    // Method 6: Sleep / Overdue Gap Pressure (numbers absent longer than ~37 spins)
+    const overdueList = [];
+    for (let n = 0; n <= 36; n++) {
+      const gap = lastSeenIdx[n] === -1 ? windowSpins.length : lastSeenIdx[n];
+      if (gap >= 28) {
+        overdueList.push({ n, gap });
+      }
+    }
+    overdueList.sort((a, b) => b.gap - a.gap);
+    if (overdueList[0]) overdueTarget = overdueList[0].n;
+    overdueList.slice(0, 5).forEach((od, idx) => {
+      const pts = Math.max(5, 13 - idx * 2) + Math.min(6, Math.floor((od.gap - 28) / 6));
+      scores[od.n] += pts;
+      reasons[od.n].push(`<span class="src-sys">[M6: Overdue Gap]</span> Unseen for ${od.gap} spins (avg cycle ~37)`);
+    });
+
+    // Method 7 (Zig-Zag Strategy): Color Alternation, Dozen/High-Low Sawtooth & Wheel Zig-Zag
+    const zigzagCandidates = new Set();
+    const zigzagNotes = [];
+
+    if (windowSpins.length >= 2) {
+      const c0 = getColor(latest);
+      const c1 = getColor(second);
+      const c2 = third !== undefined ? getColor(third) : null;
+
+      // Color Zig-Zag: alternating RED/BLACK pattern (e.g. R-B-R -> expect B, or R-B -> expect R)
+      if (c0 !== 'GREEN' && c1 !== 'GREEN' && c0 !== c1) {
+        const isAlternating3 = (c2 !== null && c2 !== 'GREEN' && c2 === c0);
+        const expectedNextColor = c0 === 'RED' ? 'BLACK' : 'RED';
+        const ptsColor = isAlternating3 ? 19 : 13;
+        const tagText = isAlternating3
+          ? `3-step Color Zig-Zag (${c2}→${c1}→${c0}) → expect ${expectedNextColor}`
+          : `Color Zig-Zag (${c1}→${c0}) → expect ${expectedNextColor}`;
+        zigzagLabel = `${expectedNextColor} Zig-Zag`;
+        alerts.push(`<div class="alert-box">⚡ <strong>Zig-Zag Color Strategy:</strong> ${tagText} active.</div>`);
+
+        for (let n = 1; n <= 36; n++) {
+          if (getColor(n) === expectedNextColor) {
+            const boost = (freq[n] || 0) > 0 ? ptsColor + 3 : ptsColor;
+            scores[n] += boost;
+            reasons[n].push(`<span class="src-sys">[M7: Zig-Zag Color]</span> ${tagText}`);
+            zigzagCandidates.add(n);
+            if (zigzagTarget === null) zigzagTarget = n;
+          }
+        }
+        zigzagNotes.push(tagText);
+      }
+
+      // Dozen Zig-Zag (e.g. D1 -> D2 -> D1 -> expect D2)
+      const getDozen = (x) => (x >= 1 && x <= 12) ? 1 : ((x >= 13 && x <= 24) ? 2 : ((x >= 25 && x <= 36) ? 3 : 0));
+      const d0 = getDozen(latest);
+      const d1 = getDozen(second);
+      const d2 = third !== undefined ? getDozen(third) : 0;
+      if (d0 > 0 && d1 > 0 && d0 !== d1) {
+        const expectedDozen = (d2 > 0 && d2 === d0) ? d1 : (d0 === 1 ? 2 : (d0 === 2 ? 3 : 1));
+        const dStart = (expectedDozen - 1) * 12 + 1;
+        const dEnd = expectedDozen * 12;
+        const dTag = `Dozen Zig-Zag (D${d1}→D${d0}) → D${expectedDozen} (${dStart}–${dEnd})`;
+        if (zigzagLabel === '—') zigzagLabel = `D${expectedDozen} Zig-Zag`;
+        for (let n = dStart; n <= dEnd; n++) {
+          scores[n] += 7;
+          reasons[n].push(`<span class="src-sys">[M7: Zig-Zag Dozen]</span> ${dTag}`);
+          zigzagCandidates.add(n);
+          if (zigzagTarget === null) zigzagTarget = n;
+        }
+        zigzagNotes.push(dTag);
+      }
+
+      // Wheel Zig-Zag: bounce Left (-1), Right (+1), Left (-2), Right (+2) around `latest` on WHEEL_ORDER
+      const wIdx = WHEEL_ORDER.indexOf(latest);
+      if (wIdx !== -1) {
+        const lenW = WHEEL_ORDER.length;
+        const zzSteps = [
+          { offset: -1, w: 14, lbl: 'L1' },
+          { offset: +1, w: 13, lbl: 'R1' },
+          { offset: -2, w: 10, lbl: 'L2' },
+          { offset: +2, w: 9,  lbl: 'R2' }
+        ];
+        zzSteps.forEach(st => {
+          const targetNum = WHEEL_ORDER[(wIdx + st.offset + lenW) % lenW];
+          scores[targetNum] += st.w;
+          reasons[targetNum].push(`<span class="src-whl">[M7: Wheel Zig-Zag ${st.lbl}]</span> Sawtooth step ${st.offset > 0 ? '+' + st.offset : st.offset} from #${latest}`);
+          zigzagCandidates.add(targetNum);
+          if (zigzagTarget === null) zigzagTarget = targetNum;
+        });
+        zigzagNotes.push(`Wheel Sawtooth around #${latest} (L1/R1/L2/R2)`);
+      }
+    }
+
+    // Dozen & Column Reversion Alerts
+    if (windowSpins.length >= 6) {
+      const recent6 = windowSpins.slice(0, 6);
+      const d1 = recent6.filter(x => x >= 1 && x <= 12).length;
+      const d2 = recent6.filter(x => x >= 13 && x <= 24).length;
+      const d3 = recent6.filter(x => x >= 25 && x <= 36).length;
+      if (d1 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>Dozen Shift:</strong> Last 6 spins mein 1st Dozen (1–12) ${d1} baar aaya hai.</div>`);
+      if (d2 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>Dozen Shift:</strong> Last 6 spins mein 2nd Dozen (13–24) ${d2} baar aaya hai.</div>`);
+      if (d3 >= 4) alerts.push(`<div class="alert-box">⚖️ <strong>Dozen Shift:</strong> Last 6 spins mein 3rd Dozen (25–36) ${d3} baar aaya hai.</div>`);
+    }
+
+    // Method 8: User Custom Rules
+    evaluateCustomRules(windowSpins, scores, reasons, alerts, activeRuleIds);
+
+    // Method 9: Digit-Swap Mirror (31↔13), Ending Series (1-11-21-31, 7-17-27, 8-18-28, etc.), 6-9 Family & 2nd-Col Odd Series (11,17,29,35)
+    const SERIES_BY_END = {
+      0: [0, 10, 20, 30],
+      1: [1, 11, 21, 31],
+      2: [2, 12, 22, 32],
+      3: [3, 13, 23, 33],
+      4: [4, 14, 24, 34],
+      5: [5, 15, 25, 35],
+      6: [6, 16, 26, 36],
+      7: [7, 17, 27],
+      8: [8, 18, 28],
+      9: [9, 19, 29]
+    };
+    const COL2_ALL = new Set([2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35]);
+    const COL2_ODD = [5, 11, 17, 23, 29, 35];
+    const SIX_NINE_FAMILY = [6, 9, 16, 19, 26, 29, 36];
+
+    function getDigitSwapMirror(num) {
+      if (num < 10 || num > 36) return null;
+      const tens = Math.floor(num / 10);
+      const units = num % 10;
+      if (units === 0) return null;
+      const swapped = units * 10 + tens;
+      return (swapped >= 0 && swapped <= 36 && swapped !== num) ? swapped : null;
+    }
+
+    const activeSeriesHints = [];
+
+    // 9A. Digit-Swap Mirror (e.g. 31 <-> 13, 12 <-> 21, 23 <-> 32)
+    const swapNum = getDigitSwapMirror(latest);
+    const isRepeaterLatest = (second !== undefined && latest === second);
+    if (swapNum !== null) {
+      const swapBoost = isRepeaterLatest ? 28 : 19;
+      scores[swapNum] += swapBoost;
+      reasons[swapNum].push(`<span class="src-sys">[M9: Digit Mirror]</span> Swap of #${latest} → #${swapNum}${isRepeaterLatest ? ' (after repeater)' : ''}`);
+      alerts.push(`<div class="alert-box">🔀 <strong>Digit Mirror Watch:</strong> Latest <b>${latest}</b>${isRepeaterLatest ? ' (repeater)' : ''} ka digit-swap mirror <b>${swapNum}</b> active (${latest} ↔ ${swapNum}).</div>`);
+    }
+
+    // 9B. Ending Digit Series (e.g. 1-11-21-31, 4-14-24-34, 5-15-25-35, 7-17-27, 8-18-28)
+    const endDigit = latest % 10;
+    const endSeriesNums = SERIES_BY_END[endDigit] || [];
+    if (endSeriesNums.length > 0) {
+      const recentSeriesHits = windowSpins.slice(0, 5).filter(x => endSeriesNums.includes(x)).length;
+      const seriesPts = recentSeriesHits >= 2 ? 17 : 11;
+      endSeriesNums.forEach(sNum => {
+        if (sNum !== latest) {
+          scores[sNum] += seriesPts;
+          reasons[sNum].push(`<span class="src-sys">[M9: Series-${endDigit}]</span> Ending-${endDigit} family [${endSeriesNums.join(' / ')}] (${recentSeriesHits}/5 recent)`);
+        }
+      });
+      const serCov = ((endSeriesNums.length / 37) * 100).toFixed(2);
+      const serProb = Math.min(25, (endSeriesNums.length / 37) * 100 * (recentSeriesHits >= 2 ? 1.15 : 1.05)).toFixed(2);
+      activeSeriesHints.push({
+        title: `🔢 Ending-${endDigit} Series (${endSeriesNums.join(' • ')})`,
+        numbers: endSeriesNums,
+        probPct: serProb,
+        covPct: serCov,
+        logic: `Numbers ending in ${endDigit} (${recentSeriesHits} hits in last 5 spins) around #${latest}.`
+      });
+    }
+
+    // 9C. 6-9 Series / Family (6, 9, 16, 19, 26, 29, 36)
+    const recent69Hits = windowSpins.slice(0, 5).filter(x => SIX_NINE_FAMILY.includes(x)).length;
+    if (SIX_NINE_FAMILY.includes(latest) || recent69Hits >= 2) {
+      const s69Pts = recent69Hits >= 2 ? 15 : 9;
+      SIX_NINE_FAMILY.forEach(n69 => {
+        if (n69 !== latest) {
+          scores[n69] += s69Pts;
+          reasons[n69].push(`<span class="src-sys">[M9: 6-9 Series]</span> 6/9 family [${SIX_NINE_FAMILY.join(', ')}]`);
+        }
+      });
+      const c69Cov = ((SIX_NINE_FAMILY.length / 37) * 100).toFixed(2);
+      const c69Prob = Math.min(28, (SIX_NINE_FAMILY.length / 37) * 100 * 1.12).toFixed(2);
+      activeSeriesHints.push({
+        title: `🎲 6–9 Series (${SIX_NINE_FAMILY.join(' • ')})`,
+        numbers: SIX_NINE_FAMILY,
+        probPct: c69Prob,
+        covPct: c69Cov,
+        logic: `Numbers ending in 6 or 9 (${recent69Hits} hits in last 5 spins).`
+      });
+    }
+
+    // 9D. 2nd Column Odd Series (focusing on 11, 17, 29, 35 + 2nd-col odd set 5, 11, 17, 23, 29, 35)
+    const recentCol2Odd = windowSpins.slice(0, 5).filter(x => COL2_ALL.has(x) && x % 2 === 1).length;
+    if (COL2_ALL.has(latest) || recentCol2Odd >= 2) {
+      const focusOddCol2 = [11, 17, 29, 35];
+      focusOddCol2.forEach(oddNum => {
+        scores[oddNum] += (recentCol2Odd >= 2 ? 16 : 10);
+        reasons[oddNum].push(`<span class="src-sys">[M9: Col-2 Odd]</span> 2nd-Column Odd series (11, 17, 29, 35)`);
+      });
+      const col2Cov = ((COL2_ODD.length / 37) * 100).toFixed(2);
+      const col2Prob = Math.min(26, (COL2_ODD.length / 37) * 100 * 1.1).toFixed(2);
+      activeSeriesHints.push({
+        title: `🏛️ 2nd Column Odd Series (Focus: 11, 17, 29, 35 • Full: ${COL2_ODD.join(', ')})`,
+        numbers: COL2_ODD,
+        probPct: col2Prob,
+        covPct: col2Cov,
+        logic: `Odd numbers in the 2nd column (2,5,8,11,14,17,20,23,26,29,32,35) with ${recentCol2Odd}/5 recent hits.`
+      });
+    }
+
     // Method 10: Arithmetic Add/Subtract History Scan (e.g. A then B -> A+B or |A-B|, plus latest + second & |latest - second|)
     const arithHistoryHits = [];
     const scanLimit = Math.min(windowSpins.length - 2, 120);
@@ -1109,148 +2932,6 @@
         logic: `Historical pairs (A then B) in your spin log followed by A+B or |A-B| within 1–4 spins.`
       });
     }
-
-    // Method 11: Auto-Detect Current Live Series, Algorithm & Odd/Even + Red/Black Bias (7-8 Focus Numbers)
-    const recentSlice = windowSpins.slice(0, Math.min(8, windowSpins.length));
-    let recentRed = 0, recentBlack = 0, recentZero = 0, recentOdd = 0, recentEven = 0;
-    recentSlice.forEach(x => {
-      const col = getColor(x);
-      if (col === 'RED') recentRed++;
-      else if (col === 'BLACK') recentBlack++;
-      else recentZero++;
-      if (x !== 0) {
-        if (x % 2 === 1) recentOdd++;
-        else recentEven++;
-      }
-    });
-
-    // Determine current Red/Black call (alternation vs streak/balance)
-    let rbCall = 'RED / BLACK';
-    let rbReason = 'Balanced recent colors';
-    if (windowSpins.length >= 2 && getColor(latest) !== 'GREEN' && getColor(second) !== 'GREEN') {
-      const cLatest = getColor(latest);
-      const cPrev = getColor(second);
-      if (cLatest !== cPrev) {
-        rbCall = cLatest === 'RED' ? 'BLACK (Zig-Zag)' : 'RED (Zig-Zag)';
-        rbReason = `Alternating ${cPrev} → ${cLatest}`;
-      } else {
-        // Same color twice in a row: either continuation or mean-reversion lean
-        rbCall = cLatest === 'RED' ? 'RED (Trend) / BLACK (Flip)' : 'BLACK (Trend) / RED (Flip)';
-        rbReason = `Back-to-back ${cLatest}`;
-      }
-    } else if (recentRed !== recentBlack) {
-      rbCall = recentRed > recentBlack ? 'BLACK (Reversion)' : 'RED (Reversion)';
-      rbReason = `Last ${recentSlice.length}: R=${recentRed}, B=${recentBlack}`;
-    }
-
-    // Determine current Odd/Even call
-    let oeCall = 'ODD / EVEN';
-    let oeReason = 'Balanced odd/even';
-    const nonZeroRecent = recentOdd + recentEven;
-    if (windowSpins.length >= 2 && latest !== 0 && second !== 0) {
-      const isOdd0 = latest % 2 === 1;
-      const isOdd1 = second % 2 === 1;
-      if (isOdd0 !== isOdd1) {
-        oeCall = isOdd0 ? 'EVEN (Zig-Zag)' : 'ODD (Zig-Zag)';
-        oeReason = `Alternating ${isOdd1 ? 'ODD' : 'EVEN'} → ${isOdd0 ? 'ODD' : 'EVEN'}`;
-      } else if (recentOdd >= recentEven + 2) {
-        oeCall = 'EVEN (Balance)';
-        oeReason = `Odd heavy (${recentOdd} Odd vs ${recentEven} Even)`;
-      } else if (recentEven >= recentOdd + 2) {
-        oeCall = 'ODD (Balance)';
-        oeReason = `Even heavy (${recentEven} Even vs ${recentOdd} Odd)`;
-      } else {
-        oeCall = isOdd0 ? 'ODD (Follow)' : 'EVEN (Follow)';
-        oeReason = `Last spin ${latest} is ${isOdd0 ? 'ODD' : 'EVEN'}`;
-      }
-    } else if (nonZeroRecent > 0 && recentOdd !== recentEven) {
-      oeCall = recentOdd > recentEven ? 'EVEN (Balance)' : 'ODD (Balance)';
-      oeReason = `Recent Odd=${recentOdd}, Even=${recentEven}`;
-    }
-
-    // Auto-detect strongest active series & algorithm right now
-    let detectedAlgoName = 'Multi-Signal Blend';
-    let detectedSeriesName = `Ending-${latest % 10} Series`;
-    const seedPool = [];
-
-    // Check if an active series or arithmetic pair or digit mirror is leading right now
-    const recent5 = windowSpins.slice(0, 5);
-    let bestSeriesEntry = null;
-    let bestSeriesScore = -1;
-    for (const [dStr, arr] of Object.entries(SERIES_BY_END)) {
-      const hits5 = recent5.filter(x => arr.includes(x)).length;
-      const containsLatest = arr.includes(latest) ? 1 : 0;
-      const sScore = hits5 * 3 + containsLatest * 2;
-      if (sScore > bestSeriesScore) {
-        bestSeriesScore = sScore;
-        bestSeriesEntry = { end: parseInt(dStr, 10), nums: arr, hits5 };
-      }
-    }
-
-    if (bestSeriesEntry) {
-      detectedSeriesName = `Series-${bestSeriesEntry.end} [${bestSeriesEntry.nums.join('-')}] (${bestSeriesEntry.hits5}/5)`;
-      bestSeriesEntry.nums.forEach(n => { if (!seedPool.includes(n)) seedPool.push(n); });
-    }
-
-    // Check 2nd-col odd series or 6-9 series
-    const col2OddHits5 = recent5.filter(x => COL2_ALL.has(x) && x % 2 === 1).length;
-    const s69Hits5 = recent5.filter(x => SIX_NINE_FAMILY.includes(x)).length;
-    if (col2OddHits5 >= 2) {
-      detectedSeriesName = `2nd-Col Odd [11,17,29,35] (${col2OddHits5}/5)`;
-      [11, 17, 29, 35, 5, 23].forEach(n => { if (!seedPool.includes(n)) seedPool.push(n); });
-    } else if (s69Hits5 >= 2) {
-      detectedSeriesName = `6–9 Series [6,9,16,19,26,29,36] (${s69Hits5}/5)`;
-      SIX_NINE_FAMILY.forEach(n => { if (!seedPool.includes(n)) seedPool.push(n); });
-    }
-
-    // Check active algorithm: Arithmetic A+B / |A-B|, Step-Lock, Mirror/Repeater, or Zig-Zag
-    if (arithPairSummary.size > 0) {
-      const firstArith = Array.from(arithPairSummary.values())[0];
-      detectedAlgoName = `Add/Sub (${firstArith.a}${firstArith.op === '+' ? '+' : '-'}${firstArith.b}=${firstArith.result})`;
-      Array.from(arithPairSummary.values()).slice(0, 3).forEach(h => {
-        if (!seedPool.includes(h.result)) seedPool.push(h.result);
-      });
-    } else if (second !== undefined && latest !== second) {
-      const sSum = second + latest;
-      const sDiff = Math.abs(second - latest);
-      detectedAlgoName = `Live Add/Sub (${second}±${latest})`;
-      if (sSum <= 36 && !seedPool.includes(sSum)) seedPool.push(sSum);
-      if (sDiff <= 36 && !seedPool.includes(sDiff)) seedPool.push(sDiff);
-    }
-
-    if (swapNum !== null && !seedPool.includes(swapNum)) {
-      seedPool.unshift(swapNum);
-      if (detectedAlgoName === 'Multi-Signal Blend') detectedAlgoName = `Digit Mirror (${latest}↔${swapNum})`;
-    }
-
-    if (second !== undefined && !seedPool.includes(second)) seedPool.push(second);
-    if (!seedPool.includes(latest)) seedPool.push(latest);
-
-    // Expand pool to 8 numbers using wheel neighbors around latest
-    for (const nb of detailedNeighbors) {
-      if (seedPool.length >= 8) break;
-      if (!seedPool.includes(nb.num)) seedPool.push(nb.num);
-    }
-    for (let n = 0; n <= 36 && seedPool.length < 8; n++) {
-      if (!seedPool.includes(n)) seedPool.push(n);
-    }
-
-    const liveFocusNums = seedPool.slice(0, Math.min(8, Math.max(7, targetCount)));
-    liveFocusNums.forEach((fNum, i) => {
-      const boost = Math.max(6, 15 - i);
-      scores[fNum] += boost;
-      reasons[fNum].push(`<span class="src-sys">[M11: Live Auto-Call]</span> Active ${detectedSeriesName} + ${detectedAlgoName}`);
-    });
-
-    const liveAutoCall = {
-      numbers: liveFocusNums,
-      seriesName: detectedSeriesName,
-      algoName: detectedAlgoName,
-      rbCall,
-      rbReason,
-      oeCall,
-      oeReason
-    };
 
     // Build top `targetCount` candidates (>= 7 numbers)
     const ranked = Object.keys(scores)
@@ -1376,7 +3057,7 @@
     }
 
     const combinedSeriesHints = [...zzSeriesList, ...activeSeriesHints];
-    return { candidates: enriched, alerts, activeRuleIds, methodSummary, zzSeriesList: combinedSeriesHints, liveAutoCall };
+    return { candidates: enriched, alerts, activeRuleIds, methodSummary, zzSeriesList: combinedSeriesHints };
   }
 
   function renderCustomRulesList(activeRuleIds) {
@@ -1444,7 +3125,7 @@
 
     if (activeSpins.length === 0) {
       if (methodBarEl) methodBarEl.innerHTML = '';
-      quickHintsBar.innerHTML = `<div class='empty-state' style='padding:12px;margin-bottom:8px;'>Spin punch karte hi current series, algorithm, Odd/Even, Red/Black aur 7–8 numbers auto-read ho jayenge.</div>`;
+      quickHintsBar.innerHTML = '';
       alertsEl.innerHTML = '';
       hintsEl.innerHTML = `<div class="empty-state">Abhi koi number feed nahi hai.<br/>Numbers punch karein — ${hintCount} hinted numbers aur unki probability % yahan aayegi.</div>`;
       renderCustomRulesList(new Set());
@@ -1458,28 +3139,7 @@
         }</div>`;
       }
 
-      const autoBoxHtml = liveAutoCall ? `
-        <div class="alert-box" style="background:rgba(45,212,191,0.09);border-color:rgba(45,212,191,0.45);margin-bottom:10px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-            <strong>⚡ Current Auto-Read Call (${liveAutoCall.numbers.length} Numbers)</strong>
-            <span style="display:flex;gap:6px;flex-wrap:wrap;">
-              <span class="hint-prob-tag">Odd/Even: ${liveAutoCall.oeCall}</span>
-              <span class="hint-prob-tag">Color: ${liveAutoCall.rbCall}</span>
-            </span>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
-            ${liveAutoCall.numbers.map(n => `<span class="num-pill ${getColorClass(n)}">${n}</span>`).join('')}
-          </div>
-          <div style="font-size:0.76rem;color:#d1d5db;line-height:1.4;">
-            <strong>Series:</strong> ${liveAutoCall.seriesName} &nbsp;•&nbsp;
-            <strong>Algo:</strong> ${liveAutoCall.algoName}<br/>
-            <span style="color:var(--muted);"><strong>O/E Note:</strong> ${liveAutoCall.oeReason} &nbsp;•&nbsp; <strong>R/B Note:</strong> ${liveAutoCall.rbReason}</span>
-          </div>
-        </div>
-      ` : '';
-
       quickHintsBar.innerHTML = `
-        ${autoBoxHtml}
         <div class="quick-hints-bar">
           <span class="quick-hints-title">${candidates.length} Hints (${covPct}%):</span>
           ${candidates.map(c => `
